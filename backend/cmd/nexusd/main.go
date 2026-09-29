@@ -48,6 +48,7 @@ func main() {
 	critic := agent.NewCriticAgent(llmClient)
 	sec := agent.NewSecurityAgent(llmClient)
 	arb := agent.NewArbiterAgent(llmClient)
+	matrix := agent.NewMatrixEngine(llmClient)
 
 	// 5. Initialize Swarm Orchestrator
 	orch := orchestrator.NewOrchestrator(
@@ -55,7 +56,7 @@ func main() {
 			MaxRounds: cfg.MaxRounds,
 			Mode:      cfg.Mode,
 		},
-		arch, coder, critic, sec, arb, memStore,
+		arch, coder, critic, sec, arb, memStore, matrix, cfg.DataDir,
 	)
 
 	// 6. Initialize WebSocket Streaming Hub

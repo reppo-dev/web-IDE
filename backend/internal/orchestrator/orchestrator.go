@@ -8,6 +8,8 @@ import (
 	"github.com/nexusai/nexusai/backend/internal/agent"
 	"github.com/nexusai/nexusai/backend/internal/domain"
 	"github.com/nexusai/nexusai/backend/internal/memory"
+	"github.com/nexusai/nexusai/backend/internal/sandbox"
+	"github.com/nexusai/nexusai/backend/internal/scoring"
 )
 
 // EventType defines the kind of orchestrator event broadcast to listeners.
@@ -52,6 +54,11 @@ type Orchestrator struct {
 	arbiter   agent.Agent
 	memStore  memory.MemoryStore
 
+	matrixEngine *agent.MatrixEngine
+	sandbox      *sandbox.Runner
+	detector     *scoring.ConvergenceDetector
+	baseDir      string
+
 	eventsMu    sync.RWMutex
 	subscribers []chan SwarmEvent
 }
@@ -65,6 +72,8 @@ func NewOrchestrator(
 	sec agent.Agent,
 	arb agent.Agent,
 	mem memory.MemoryStore,
+	matrix *agent.MatrixEngine,
+	baseDir string,
 ) *Orchestrator {
 	if cfg.MaxRounds <= 0 {
 		cfg.MaxRounds = 5
@@ -74,14 +83,18 @@ func NewOrchestrator(
 	}
 
 	return &Orchestrator{
-		config:      cfg,
-		architect:   arch,
-		coder:       coder,
-		critic:      critic,
-		security:    sec,
-		arbiter:     arb,
-		memStore:    mem,
-		subscribers: make([]chan SwarmEvent, 0),
+		config:       cfg,
+		architect:    arch,
+		coder:        coder,
+		critic:       critic,
+		security:     sec,
+		arbiter:      arb,
+		memStore:     mem,
+		matrixEngine: matrix,
+		sandbox:      sandbox.NewRunner(10 * time.Second),
+		detector:     scoring.NewConvergenceDetector(3),
+		baseDir:      baseDir,
+		subscribers:  make([]chan SwarmEvent, 0),
 	}
 }
 

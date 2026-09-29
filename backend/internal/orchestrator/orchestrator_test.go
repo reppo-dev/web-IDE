@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -34,12 +35,14 @@ func setupTestOrchestrator(mode domain.ExecutionMode) *Orchestrator {
 	critic := agent.NewCriticAgent(mockClient)
 	sec := agent.NewSecurityAgent(mockClient)
 	arb := agent.NewArbiterAgent(mockClient)
+	matrix := agent.NewMatrixEngine(mockClient)
 
 	cfg := Config{
 		MaxRounds: 3,
 		Mode:      mode,
 	}
-	return NewOrchestrator(cfg, arch, coder, critic, sec, arb, nil)
+	tempDir, _ := os.MkdirTemp("", "orch-test-*")
+	return NewOrchestrator(cfg, arch, coder, critic, sec, arb, nil, matrix, tempDir)
 }
 
 func TestOrchestrator_Modes(t *testing.T) {

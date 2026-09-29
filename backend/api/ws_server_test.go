@@ -30,10 +30,10 @@ func TestWSServer_Connection(t *testing.T) {
 	critic := agent.NewCriticAgent(dummy)
 	sec := agent.NewSecurityAgent(dummy)
 	arb := agent.NewArbiterAgent(dummy)
-
+	matrix := agent.NewMatrixEngine(dummy)
 	orch := orchestrator.NewOrchestrator(
 		orchestrator.Config{MaxRounds: 2, Mode: domain.ModeSequential},
-		arch, coder, critic, sec, arb, nil,
+		arch, coder, critic, sec, arb, nil, matrix, t.TempDir(),
 	)
 
 	wsHub := NewWSServer(orch, nil, nil)

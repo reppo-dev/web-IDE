@@ -7,6 +7,7 @@ import (
 
 	"github.com/nexusai/nexusai/backend/internal/agent"
 	"github.com/nexusai/nexusai/backend/internal/domain"
+	"github.com/nexusai/nexusai/backend/internal/workspace"
 )
 
 func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userPrompt string) (*agent.SwarmContext, error) {
@@ -15,6 +16,12 @@ func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userP
 		Round:      1,
 		UserPrompt: userPrompt,
 		MemStore:   o.memStore,
+	}
+
+	// 1. Initialize Disk Workspace with Git tracking
+	ws, err := workspace.NewWorkspace(o.baseDir, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize project workspace: %w", err)
 	}
 
 	for round := 1; round <= o.config.MaxRounds; round++ {
@@ -57,6 +64,15 @@ func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userP
 		if err != nil {
 			return nil, fmt.Errorf("role-based [phase 2a]: coder failed: %w", err)
 		}
+
+		// Sync files to physical workspace disk and compute diffs
+		if len(sCtx.CodeFiles) > 0 {
+			syncedFiles, err := ws.SyncFiles(sCtx.CodeFiles)
+			if err == nil {
+				sCtx.CodeFiles = syncedFiles
+			}
+		}
+
 		o.broadcast(SwarmEvent{
 			Type:      EventAgentOutput,
 			ProjectID: projectID,
@@ -72,14 +88,30 @@ func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userP
 			Files:     sCtx.CodeFiles,
 		})
 
-		// PHASE 2B: Critic AND Security Auditor run CONCURRENTLY on the generated code
+		// Run real compilation verification in sandbox
+		if len(sCtx.CodeFiles) > 0 && o.sandbox != nil {
+			execRes := o.sandbox.VerifyCodebase(ctx, ws.Path(), sCtx.CodeFiles)
+			if !execRes.Success && len(execRes.ErrorsFound) > 0 {
+				if sCtx.CriticReview == nil {
+					sCtx.CriticReview = &domain.CriticPayload{}
+				}
+				for _, compErr := range execRes.ErrorsFound {
+					sCtx.CriticReview.Issues = append(sCtx.CriticReview.Issues, domain.ReviewIssue{
+						Severity:    "critical",
+						File:        "compiler",
+						Description: fmt.Sprintf("Compiler/Syntax failure: %s", compErr),
+					})
+				}
+			}
+		}
+
+		// PHASE 2B: Critic AND Security Auditor run CONCURRENTLY
 		var wg sync.WaitGroup
 		var criticErr, secErr error
 		var criticMsg, secMsg *domain.AgentMessage
 
 		wg.Add(2)
 
-		// Goroutine 1: Critic
 		go func() {
 			defer wg.Done()
 			o.broadcast(SwarmEvent{
@@ -100,7 +132,6 @@ func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userP
 			}
 		}()
 
-		// Goroutine 2: Security Auditor
 		go func() {
 			defer wg.Done()
 			o.broadcast(SwarmEvent{
@@ -130,6 +161,19 @@ func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userP
 			return nil, fmt.Errorf("role-based [phase 2b]: security audit failed: %w", secErr)
 		}
 
+		// PHASE 2C: Full N-to-N Peer Cross-Examination (Every agent reviews the other 4)
+		if o.matrixEngine != nil {
+			matrix, err := o.matrixEngine.ExecuteCrossExamination(ctx, sCtx)
+			if err == nil {
+				o.broadcast(SwarmEvent{
+					Type:      EventAgentOutput,
+					ProjectID: projectID,
+					Round:     round,
+					Payload:   matrix,
+				})
+			}
+		}
+
 		// PHASE 3: Arbiter Evaluates Consensus
 		o.broadcast(SwarmEvent{
 			Type:      EventAgentThinking,
@@ -141,6 +185,23 @@ func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userP
 		if err != nil {
 			return nil, fmt.Errorf("role-based [phase 3]: arbiter judgment failed: %w", err)
 		}
+
+		// Check for oscillation/stalemate
+		if o.detector != nil && sCtx.ArbiterVerdict != nil {
+			o.detector.RecordRound(round, sCtx.ArbiterVerdict.FinalScore)
+			if o.detector.IsStalemate() {
+				resolvedScore, note := o.detector.ResolveStalemate(sCtx.ArbiterVerdict.FinalScore)
+				sCtx.ArbiterVerdict.FinalScore = resolvedScore
+				sCtx.ArbiterVerdict.Passed = resolvedScore >= sCtx.ArbiterVerdict.Threshold
+				sCtx.ArbiterVerdict.Summary += " [" + note + "]"
+			}
+		}
+
+		// Git auto-commit this round
+		if sCtx.ArbiterVerdict != nil {
+			_, _ = ws.CommitRound(ctx, round, sCtx.ArbiterVerdict.FinalScore, sCtx.ArbiterVerdict.Summary)
+		}
+
 		o.broadcast(SwarmEvent{
 			Type:      EventAgentOutput,
 			ProjectID: projectID,
