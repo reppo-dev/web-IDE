@@ -135,7 +135,15 @@ func (o *Orchestrator) broadcast(evt SwarmEvent) {
 
 // Run executes the swarm using the configured mode until consensus is reached or max rounds hit.
 func (o *Orchestrator) Run(ctx context.Context, projectID string, userPrompt string) (*agent.SwarmContext, error) {
-	switch o.config.Mode {
+	return o.RunWithMode(ctx, projectID, userPrompt, o.config.Mode)
+}
+
+// RunWithMode executes the swarm using a dynamic execution mode.
+func (o *Orchestrator) RunWithMode(ctx context.Context, projectID string, userPrompt string, mode domain.ExecutionMode) (*agent.SwarmContext, error) {
+	if mode == "" {
+		mode = o.config.Mode
+	}
+	switch mode {
 	case domain.ModeSequential:
 		return o.runSequential(ctx, projectID, userPrompt)
 	case domain.ModeConcurrent:

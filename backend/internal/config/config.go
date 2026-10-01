@@ -1,7 +1,9 @@
 package config
 
 import (
+	"bufio"
 	"os"
+	"strings"
 
 	"github.com/nexusai/nexusai/backend/internal/domain"
 	"github.com/nexusai/nexusai/backend/internal/llm"
@@ -17,8 +19,39 @@ type AppConfig struct {
 	LLM       llm.Config           `json:"llm"`
 }
 
+func loadDotEnv() {
+	paths := []string{".env", "../.env", "../../.env"}
+	for _, p := range paths {
+		f, err := os.Open(p)
+		if err != nil {
+			continue
+		}
+		defer f.Close()
+
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				key := strings.TrimSpace(parts[0])
+				val := strings.TrimSpace(parts[1])
+				val = strings.Trim(val, `"'`)
+				if os.Getenv(key) == "" {
+					os.Setenv(key, val)
+				}
+			}
+		}
+		break
+	}
+}
+
 // LoadConfig loads configuration with sensible defaults and environment variable overrides.
 func LoadConfig() AppConfig {
+	loadDotEnv()
+
 	port := os.Getenv("NEXUS_PORT")
 	if port == "" {
 		port = "8080"

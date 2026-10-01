@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/nexusai/nexusai/backend/internal/domain"
 	"github.com/nexusai/nexusai/backend/internal/memory"
 	"github.com/nexusai/nexusai/backend/internal/orchestrator"
 	"github.com/nexusai/nexusai/backend/internal/skills"
@@ -134,7 +135,16 @@ func (s *WSServer) HandleWS(w http.ResponseWriter, r *http.Request) {
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 				defer cancel()
-				_, err := s.orch.Run(ctx, clientMsg.ProjectID, clientMsg.UserPrompt)
+
+				var payload struct {
+					Mode string `json:"mode"`
+				}
+				if len(clientMsg.Payload) > 0 {
+					_ = json.Unmarshal(clientMsg.Payload, &payload)
+				}
+
+				mode := domain.ExecutionMode(payload.Mode)
+				_, err := s.orch.RunWithMode(ctx, clientMsg.ProjectID, clientMsg.UserPrompt, mode)
 				if err != nil {
 					errEvt := orchestrator.SwarmEvent{
 						Type:      orchestrator.EventError,
