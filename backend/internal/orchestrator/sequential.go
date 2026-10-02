@@ -6,15 +6,23 @@ import (
 
 	"github.com/nexusai/nexusai/backend/internal/agent"
 	"github.com/nexusai/nexusai/backend/internal/domain"
+	"github.com/nexusai/nexusai/backend/internal/workspace"
 )
 
-func (o *Orchestrator) runSequential(ctx context.Context, projectID string, userPrompt string) (*agent.SwarmContext, error) {
+func (o *Orchestrator) runSequential(ctx context.Context, projectID string, userPrompt string, agentModels map[domain.AgentRole]string, apiKeys map[string]string) (*agent.SwarmContext, error) {
 	sCtx := &agent.SwarmContext{
-		ProjectID:  projectID,
-		Round:      1,
-		UserPrompt: userPrompt,
-		MemStore:   o.memStore,
+		ProjectID:   projectID,
+		Round:       1,
+		UserPrompt:  userPrompt,
+		MemStore:    o.memStore,
+		AgentModels: agentModels,
+		APIKeys: apiKeys,
 	}
+
+	// Let agents read the real project before they write anything. This uses the
+// read-only path resolver so sequential mode does not create directories or
+// run git init the way rolebased mode does.
+	sCtx.WorkspacePath = workspace.ProjectPath(o.baseDir, projectID)
 
 	for round := 1; round <= o.config.MaxRounds; round++ {
 		sCtx.Round = round
@@ -43,6 +51,10 @@ func (o *Orchestrator) runSequential(ctx context.Context, projectID string, user
 				Agent:     domain.RoleArchitect,
 				Message:   archMsg,
 			})
+
+			if sCtx.Intent != nil && sCtx.Intent.Kind != domain.IntentBuild {
+				return o.runRelayDiscussion(ctx, sCtx, projectID, archMsg)
+			}
 		}
 
 		// 2. Lead Coder
@@ -151,3 +163,4 @@ func (o *Orchestrator) runSequential(ctx context.Context, projectID string, user
 
 	return sCtx, nil
 }
+

@@ -19,7 +19,11 @@ import {
   MemoryEntry, 
   SkillManifest 
 } from './types';
+import { SwarmPreset, SWARM_PRESETS } from './config/models';
 import { Wifi, WifiOff, GitBranch, Scale, Terminal as TermIcon } from 'lucide-react';
+
+/** The five swarm personas. Every one must be assigned a model by the user. */
+const AGENT_ROLES = ['architect', 'coder', 'critic', 'security', 'arbiter'] as const;
 
 export const App: React.FC = () => {
   // Project & Layout State
@@ -49,10 +53,46 @@ export const App: React.FC = () => {
 
   // Settings & Configuration State
   const [executionMode, setExecutionMode] = useState<ExecutionMode>('rolebased');
-  const [selectedModel, setSelectedModel] = useState<string>('gpt-4o');
+  const [selectedModel, setSelectedModel] = useState<string>('deepseek/deepseek-chat:free');
+  const [agentModels, setAgentModels] = useState<Record<string, string>>(() => {
+    const saved = localStorage.getItem('nexusai_agent_models');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        // Only honour previously saved choices if every agent still has one.
+        // Never silently substitute a default model for an unassigned agent.
+        if (AGENT_ROLES.every((r) => typeof parsed[r] === 'string' && parsed[r].length > 0)) {
+          return parsed;
+        }
+      } catch (e) {}
+    }
+    // No default assignment: the user must choose a model per agent.
+    return {} as Record<string, string>;
+  });
+
+  const unassignedAgents = AGENT_ROLES.filter((role) => !agentModels[role]);
   const [isConnected, setIsConnected] = useState<boolean>(false);
+  // Mirrors openFiles so the long-lived WebSocket handler always reads the
+  // current value without needing to re-subscribe.
+  const openFilesRef = React.useRef<string[]>([]);
   const [isRunning, setIsRunning] = useState<boolean>(false);
+  const [stalled, setStalled] = useState<boolean>(false);
   const [currentRound, setCurrentRound] = useState<number>(1);
+  const [thinkingAgent, setThinkingAgent] = useState<{ role: string, status: string } | null>(null);
+
+  const handleUpdateAgentModel = (role: string, model: string) => {
+    setAgentModels((prev) => {
+      const next = { ...prev, [role]: model };
+      localStorage.setItem('nexusai_agent_models', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const handleApplyPreset = (preset: SwarmPreset) => {
+    setAgentModels(preset.models);
+    localStorage.setItem('nexusai_agent_models', JSON.stringify(preset.models));
+    setTerminalLogs((prev) => [...prev, `[Team Config] Swarm preset active: ${preset.nameFa}`]);
+  };
 
   const [apiKeys, setApiKeys] = useState(() => {
     const saved = localStorage.getItem('nexusai_api_keys');
@@ -64,6 +104,7 @@ export const App: React.FC = () => {
       openrouter: '',
       anthropic: '',
       gemini: '',
+      ninerouter: '',
       ollamaUrl: 'http://localhost:11434/v1',
       customBaseUrl: '',
     };
@@ -99,6 +140,28 @@ export const App: React.FC = () => {
 
   // Connect WebSocket & Listen for Swarm Events
   useEffect(() => {
+    openFilesRef.current = openFiles;
+  }, [openFiles]);
+
+  // If the swarm goes quiet for a while the UI must not stay locked on
+  // "running" forever. The backend has a 15 minute context timeout, so warn
+  // before that and let the user send a new request.
+  useEffect(() => {
+    if (!isRunning) {
+      setStalled(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setStalled(true);
+      setTerminalLogs((prev) => [
+        ...prev,
+        '[Warning] No swarm activity for 3 minutes. The daemon may be busy or unreachable.',
+      ]);
+    }, 3 * 60 * 1000);
+    return () => clearTimeout(timer);
+  }, [isRunning, currentRound]);
+
+  useEffect(() => {
     wsClient.connect();
     const unsubStatus = wsClient.onStatus(setIsConnected);
 
@@ -110,7 +173,16 @@ export const App: React.FC = () => {
           setTerminalLogs((prev) => [...prev, `[Swarm] Round ${event.round} started...`]);
           break;
 
+        case 'agent_thinking':
+          if (event.payload) {
+            const role = event.agent || 'ai';
+            const status = typeof event.payload === 'string' ? event.payload : (event.payload.status || 'در حال تحلیل...');
+            setThinkingAgent({ role, status });
+          }
+          break;
+
         case 'agent_output':
+          setThinkingAgent(null);
           if (event.message) {
             setMessages((prev) => [...prev, event.message!]);
             if (event.message.summary) {
@@ -120,7 +192,7 @@ export const App: React.FC = () => {
           if (event.files && event.files.length > 0) {
             setFiles(event.files);
             // Auto open first file if none open
-            if (openFiles.length === 0) {
+            if (openFilesRef.current.length === 0) {
               setOpenFiles([event.files[0].path]);
               setActiveFile(event.files[0].path);
             }
@@ -159,7 +231,13 @@ export const App: React.FC = () => {
 
         case 'error':
           setIsRunning(false);
+          setThinkingAgent(null);
           setTerminalLogs((prev) => [...prev, `[Error] ${event.payload || 'Swarm error'}`]);
+          break;
+
+        case 'round_started':
+          // A new round clears the stalled flag.
+          setStalled(false);
           break;
       }
     });
@@ -168,7 +246,10 @@ export const App: React.FC = () => {
       unsubStatus();
       unsubEvent();
     };
-  }, [openFiles]);
+    // The swarm subscription must survive state changes. Re-subscribing on
+    // every openFiles/projectName change tore down the WebSocket handler
+    // mid-round and silently dropped swarm events.
+  }, []);
 
   const handleSaveApiKeys = (keys: any) => {
     setApiKeys(keys);
@@ -211,6 +292,29 @@ export const App: React.FC = () => {
   };
 
   const handleSendPrompt = (promptText: string) => {
+    const trimmed = promptText.trim();
+    if (!trimmed) return;
+
+    // Refuse to start the swarm until the user has chosen a model for every
+    // agent. Assigning defaults here would silently pick models and spend
+    // their credits without consent.
+    if (unassignedAgents.length > 0) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `system-${Date.now()}`,
+          from: 'architect',
+          round: currentRound,
+          type: 'error',
+          content: '',
+          summary:
+            `Swarm not started: choose a model for ${unassignedAgents.join(', ')} first.`,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+      return;
+    }
+
     const proj = projectName || 'my-nexus-project';
     if (!projectName) {
       setProjectName(proj);
@@ -225,14 +329,14 @@ export const App: React.FC = () => {
         from: 'architect',
         round: currentRound,
         type: 'user_prompt',
-        content: promptText,
-        summary: `User Prompt: ${promptText}`,
+        content: trimmed,
+        summary: `User Prompt: ${trimmed}`,
         timestamp: new Date().toISOString(),
       },
     ]);
 
-    // Send to Go backend daemon via WebSocket
-    wsClient.send('start_swarm', proj, { mode: executionMode, model: selectedModel }, promptText);
+    // Send to Go backend daemon via WebSocket with individual agent models and API keys
+    wsClient.send('start_swarm', proj, { mode: executionMode, models: agentModels, apiKeys }, trimmed);
   };
 
   const currentFileObj = files.find((f) => f.path === activeFile) || null;
@@ -250,6 +354,7 @@ export const App: React.FC = () => {
         showComposer={showComposer}
         onToggleComposer={() => setShowComposer(!showComposer)}
         onOpenCommandPalette={() => setIsNewProjectOpen(true)}
+        onOpenProjectModal={() => setIsNewProjectOpen(true)}
       />
 
       {/* 2. Main Workbench Workspace */}
@@ -324,27 +429,30 @@ export const App: React.FC = () => {
                 />
               </div>
 
-              {/* Collapsible Bottom Terminal Panel */}
-              {showBottomPanel && (
-                <TerminalView
-                  logs={terminalLogs}
-                  onClear={() => setTerminalLogs([])}
-                  onRunCommand={(cmd) => {
-                    setTerminalLogs((prev) => [...prev, cmd, `[exec] Command executed in workspace.`]);
-                  }}
-                />
-              )}
             </div>
           ) : (
             // Cursor Style Clean Welcome Screen
-            <WelcomeScreen
-              onNewProject={() => setIsNewProjectOpen(true)}
-              onOpenSettings={() => setIsSettingsOpen(true)}
-              onQuickPrompt={(p) => {
-                if (!projectName) {
-                  handleCreateProject('nexus-quickstart', 'go-microservice');
-                }
-                handleSendPrompt(p);
+            <div className="flex-1 overflow-hidden relative">
+              <WelcomeScreen
+                onNewProject={() => setIsNewProjectOpen(true)}
+                onOpenSettings={() => setIsSettingsOpen(true)}
+                onQuickPrompt={(p) => {
+                  if (!projectName) {
+                    handleCreateProject('nexus-quickstart', 'go-microservice');
+                  }
+                  handleSendPrompt(p);
+                }}
+              />
+            </div>
+          )}
+
+          {/* Collapsible Bottom Terminal Panel */}
+          {showBottomPanel && (
+            <TerminalView
+              logs={terminalLogs}
+              onClear={() => setTerminalLogs([])}
+              onRunCommand={(cmd) => {
+                setTerminalLogs((prev) => [...prev, cmd, `[exec] Command executed in workspace.`]);
               }}
             />
           )}
@@ -358,12 +466,16 @@ export const App: React.FC = () => {
             verdict={verdict}
             executionMode={executionMode}
             onSetExecutionMode={setExecutionMode}
-            selectedModel={selectedModel}
-            onSelectModel={setSelectedModel}
+            agentModels={agentModels}
+            onUpdateAgentModel={handleUpdateAgentModel}
+            onApplyPreset={handleApplyPreset}
             onSendPrompt={handleSendPrompt}
             onAcceptChanges={() => {
               setTerminalLogs((prev) => [...prev, "[Composer] Changes accepted and merged into workspace."]);
             }}
+            thinkingAgent={thinkingAgent}
+            stalled={stalled}
+            connected={isConnected}
           />
         )}
       </div>
@@ -428,6 +540,9 @@ export const App: React.FC = () => {
         onClose={() => setIsSettingsOpen(false)}
         apiKeys={apiKeys}
         onSaveApiKeys={handleSaveApiKeys}
+        agentModels={agentModels}
+        onUpdateAgentModel={handleUpdateAgentModel}
+        onApplyPreset={handleApplyPreset}
       />
 
       {/* New Project Modal */}
@@ -435,6 +550,11 @@ export const App: React.FC = () => {
         isOpen={isNewProjectOpen}
         onClose={() => setIsNewProjectOpen(false)}
         onCreateProject={handleCreateProject}
+        onOpenFolder={(path) => {
+          setProjectName(path.split(/[\\/]/).pop() || path);
+          setTerminalLogs((prev) => [...prev, `[System] Requesting folder open: ${path}`]);
+          wsClient.send('open_folder', path);
+        }}
       />
     </div>
   );

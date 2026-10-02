@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/nexusai/nexusai/backend/internal/domain"
 	"github.com/nexusai/nexusai/backend/internal/llm"
@@ -48,20 +50,56 @@ Your role:
 
 	userPrompt := fmt.Sprintf("Project Goal: %s\n%s\nCodebase:\n%s", sCtx.UserPrompt, memories, codeContent)
 
-	resp, err := cr.llmClient.Generate(ctx, llm.Request{
+	model := cr.getModelForRole(sCtx)
+	apiKey, baseURL, err := cr.getAPIKey(model, sCtx)
+	if err != nil {
+		return nil, err
+	}
+	cleanModel := cr.cleanModelName(model)
+
+	callCtx := ctx
+	var cancel context.CancelFunc
+	if cleanModel != "flash_5" {
+		callCtx, cancel = context.WithTimeout(ctx, 35*time.Second)
+		defer cancel()
+	}
+
+	resp, err := cr.llmClient.Generate(callCtx, llm.Request{
+		Model:        cleanModel,
 		SystemPrompt: systemPrompt,
 		UserPrompt:   userPrompt,
 		JSONSchema:   map[string]interface{}{"type": "object"},
+		APIKey:       apiKey,
+		BaseURL:      baseURL,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("critic review failed: %w", err)
+		if cleanModel != "flash_5" {
+			resp, err = cr.llmClient.Generate(ctx, llm.Request{
+				Model:        "flash_5",
+				SystemPrompt: systemPrompt,
+				UserPrompt:   userPrompt,
+				JSONSchema:   map[string]interface{}{"type": "object"},
+				APIKey:       apiKey,
+				BaseURL:      baseURL,
+			})
+		}
+		if err != nil {
+			return nil, fmt.Errorf("critic review failed: %w", err)
+		}
 	}
 
 	var payload domain.CriticPayload
-	if err := json.Unmarshal([]byte(resp.Content), &payload); err != nil {
+	cleaned := CleanJSON(resp.Content)
+	if err := json.Unmarshal([]byte(cleaned), &payload); err != nil {
+		// Keep the raw review as prose, but flag it so the arbiter does not
+		// mistake a non-JSON answer for "no issues found".
 		payload = domain.CriticPayload{
 			GeneralReview: resp.Content,
-			Issues:        nil,
+			Issues: []domain.ReviewIssue{{
+				Severity:    "major",
+				File:        "(unparsed)",
+				Description: "Critic returned an unparseable review; treat this round as unreviewed.",
+			}},
 		}
 	}
 
@@ -84,8 +122,20 @@ Your role:
 		}
 	}
 
-	summary := fmt.Sprintf("Critic flagged %d issues (%d critical).", len(payload.Issues), countCritical(payload.Issues))
-	return cr.createMessage(sCtx, domain.MsgCriticReview, payload, summary)
+	summary := strings.TrimSpace(payload.GeneralReview)
+	if summary == "" {
+		crit := countCritical(payload.Issues)
+		if len(payload.Issues) == 0 {
+			summary = "بازبینی کد انجام شد: هیچ باگ یا خطای منطقی یافت نشد."
+		} else {
+			summary = fmt.Sprintf("بازبینی کد انجام شد: %d باگ شناسایی شد (%d بحرانی).", len(payload.Issues), crit)
+		}
+	}
+	reason := resp.Reasoning
+	if reason == "" {
+		reason = "بررسی کیفیت، ساختار و پایداری کد برای کشف باگ‌ها و مشکلات عملکردی."
+	}
+	return cr.createMessageWithReasoning(sCtx, domain.MsgCriticReview, payload, summary, reason)
 }
 
 func countCritical(issues []domain.ReviewIssue) int {
@@ -97,3 +147,4 @@ func countCritical(issues []domain.ReviewIssue) int {
 	}
 	return c
 }
+

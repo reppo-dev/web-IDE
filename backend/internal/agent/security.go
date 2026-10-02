@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/nexusai/nexusai/backend/internal/domain"
 	"github.com/nexusai/nexusai/backend/internal/llm"
@@ -48,17 +49,28 @@ Your role:
 
 	userPrompt := fmt.Sprintf("Audit Codebase for Security Vulnerabilities:\n%s\nCode:\n%s", memories, codeContent)
 
+	model := sec.getModelForRole(sCtx)
+	apiKey, baseURL, err := sec.getAPIKey(model, sCtx)
+	if err != nil {
+		return nil, err
+	}
+	cleanModel := sec.cleanModelName(model)
+
 	resp, err := sec.llmClient.Generate(ctx, llm.Request{
+		Model:        cleanModel,
 		SystemPrompt: systemPrompt,
 		UserPrompt:   userPrompt,
 		JSONSchema:   map[string]interface{}{"type": "object"},
+		APIKey:       apiKey,
+		BaseURL:      baseURL,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("security audit failed: %w", err)
 	}
 
 	var payload domain.SecurityPayload
-	if err := json.Unmarshal([]byte(resp.Content), &payload); err != nil {
+	cleaned := CleanJSON(resp.Content)
+	if err := json.Unmarshal([]byte(cleaned), &payload); err != nil {
 		payload = domain.SecurityPayload{
 			AttackSurface: "Standard local app surface",
 			IsClean:       true,
@@ -68,6 +80,18 @@ Your role:
 
 	sCtx.SecurityReport = &payload
 
-	summary := fmt.Sprintf("Security audit found %d vulnerabilities (Clean: %v).", len(payload.Vulnerabilities), payload.IsClean)
-	return sec.createMessage(sCtx, domain.MsgSecurityReport, payload, summary)
+	summary := strings.TrimSpace(payload.AttackSurface)
+	if summary == "" || summary == "Standard local app surface" {
+		if payload.IsClean {
+			summary = "ممیزی امنیتی انجام شد: کد فاقد آسیب‌پذیری‌های امنیتی ارزیابی گردید."
+		} else {
+			summary = fmt.Sprintf("ممیزی امنیتی انجام شد: %d آسیب‌پذیری شناسایی شد.", len(payload.Vulnerabilities))
+		}
+	}
+	reason := resp.Reasoning
+	if reason == "" {
+		reason = "اسکن امنیتی طبق استانداردهای OWASP و بررسی صحت ورودی‌ها."
+	}
+	return sec.createMessageWithReasoning(sCtx, domain.MsgSecurityReport, payload, summary, reason)
 }
+

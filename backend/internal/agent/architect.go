@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/nexusai/nexusai/backend/internal/domain"
 	"github.com/nexusai/nexusai/backend/internal/llm"
@@ -19,6 +20,71 @@ func NewArchitectAgent(client llm.Client) *ArchitectAgent {
 	}
 }
 
+// classifyIntent triages the user message before any code is generated. It
+// costs one cheap model call and prevents the swarm from inventing a project
+// out of a greeting or a question.
+func (a *ArchitectAgent) classifyIntent(ctx context.Context, sCtx *SwarmContext, model, apiKey, baseURL string) (*domain.IntentRoute, error) {
+	systemPrompt := `You are the request triage layer of an autonomous coding team.
+Analyze the user's message and respond naturally.
+
+Respond with ONLY this JSON:
+{
+  "kind": "conversation" | "question" | "build",
+  "reply": "Your natural, direct, friendly, and complete response to the user. Greet back warmly if they greet (e.g. 'سلام' -> 'سلام! در خدمتم...'). If they ask a question, answer it clearly. ALWAYS WRITE IN THE EXACT SAME LANGUAGE AS THE USER.",
+  "reason": "Your internal thoughts and reasoning in the SAME LANGUAGE as the user.",
+  "reworded": "For kind=build only: the specific coding task restated clearly. Otherwise empty."
+}
+
+Guidance:
+- Greetings, small talk, pleasantries (e.g. 'سلام', 'درود', 'hi', 'hello', 'خوبی') -> 'conversation'.
+- General questions, explanations, asking about concepts -> 'question'.
+- Direct commands to write code, create files, implement features, or build (e.g. 'برو کار کن', 'کد بنویس', 'پروژه بساز', 'یک فاکتوریل بنویس', 'build', 'create') -> 'build'.
+- CRITICAL: Never force English when the user speaks Persian. The AI must speak and think naturally in the user's language.`
+
+	userPrompt := fmt.Sprintf("User message: %s", sCtx.UserPrompt)
+
+	resp, err := a.llmClient.Generate(ctx, llm.Request{
+		Model:        model,
+		APIKey:       apiKey,
+		BaseURL:      baseURL,
+		SystemPrompt: systemPrompt,
+		UserPrompt:   userPrompt,
+		JSONSchema:   map[string]interface{}{"type": "object"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("intent classification failed: %w", err)
+	}
+
+	var route domain.IntentRoute
+	if err := json.Unmarshal([]byte(resp.Content), &route); err != nil {
+		// If triage itself is unusable, fall back to the conservative choice:
+		// treat it as a question so no code is written from an unclear message.
+		return &domain.IntentRoute{
+			Kind:   domain.IntentQuestion,
+			Reply:  sCtx.UserPrompt,
+			Reason: "triage returned unparseable JSON; defaulting to conversation",
+		}, nil
+	}
+
+	switch route.Kind {
+	case domain.IntentBuild:
+		if route.Reworded != "" {
+			sCtx.UserPrompt = route.Reworded
+		}
+	case domain.IntentConversation, domain.IntentQuestion:
+		// Never substitute the internal justification for an actual answer.
+		if route.Reply == "" {
+			route.Reply = sCtx.UserPrompt
+		}
+	default:
+		route.Kind = domain.IntentQuestion
+		if route.Reply == "" {
+			route.Reply = sCtx.UserPrompt
+		}
+	}
+	return &route, nil
+}
+
 func (a *ArchitectAgent) Execute(ctx context.Context, sCtx *SwarmContext) (*domain.AgentMessage, error) {
 	memories := a.fetchMemories(ctx, sCtx)
 
@@ -26,19 +92,53 @@ func (a *ArchitectAgent) Execute(ctx context.Context, sCtx *SwarmContext) (*doma
 Your role:
 - Analyze user requests (whether in Persian or English).
 - Decompose requirements into structured file trees, architecture designs, and API contracts.
-- Select the cleanest architectural patterns (Clean Architecture, DDD, Repository Pattern).
+- For simple requests or single functions, plan 1-2 concise files (e.g. main.go or main_test.go) for rapid execution.
 - If the user prompt is in Persian, reason and describe components in fluent Persian, but keep file paths and API contracts in standard English.
 - Return ONLY valid JSON conforming to the following structure:
 {
-  "project_overview": "Summary of the system architecture",
-  "file_tree": ["path/to/file1.go", "path/to/file2.go"],
-  "key_components": ["Component A description", "Component B description"],
+  "project_overview": "Summary of the system architecture in the user's language",
+  "file_tree": ["path/to/file1.go"],
+  "key_components": ["Component description in the user's language"],
   "api_contracts": ["Endpoint/Interface specs"]
 }`
+
+	model := a.getModelForRole(sCtx)
+	apiKey, baseURL, err := a.getAPIKey(model, sCtx)
+	if err != nil {
+		return nil, err
+	}
+	cleanModel := a.cleanModelName(model)
+
+	// Triage first: greetings and questions must not trigger a build. This must
+	// run before the blueprint prompt is composed, because triage may restate
+	// the request as a clearer engineering task.
+	intent, err := a.classifyIntent(ctx, sCtx, cleanModel, apiKey, baseURL)
+	if err != nil {
+		return nil, err
+	}
+	if intent.Kind != domain.IntentBuild {
+		sCtx.Intent = intent
+		reply := strings.TrimSpace(intent.Reply)
+		if reply == "" {
+			if strings.Contains(sCtx.UserPrompt, "سلام") || strings.Contains(sCtx.UserPrompt, "درود") {
+				reply = "سلام! در خدمتم. چه کاری یا پروژه‌ای مد نظرتونه؟"
+			} else {
+				reply = "درود! آماده به کارم، بفرمایید چه کمکی می‌تونم انجام بدم؟"
+			}
+		}
+		reason := strings.TrimSpace(intent.Reason)
+		if reason == "" {
+			reason = "تحلیل درخواست کاربر و پاسخ متناسب به زبان پیام."
+		}
+		return a.createMessageWithReasoning(sCtx, domain.MsgBlueprint, intent, reply, reason)
+	}
 
 	userPrompt := fmt.Sprintf("User Request: %s\n%s", sCtx.UserPrompt, memories)
 
 	resp, err := a.llmClient.Generate(ctx, llm.Request{
+		Model:        cleanModel,
+		APIKey:       apiKey,
+		BaseURL:      baseURL,
 		SystemPrompt: systemPrompt,
 		UserPrompt:   userPrompt,
 		JSONSchema:   map[string]interface{}{"type": "object"},
@@ -48,13 +148,11 @@ Your role:
 	}
 
 	var blueprint domain.BlueprintPayload
-	if err := json.Unmarshal([]byte(resp.Content), &blueprint); err != nil {
-		// Fallback for structured parsing
-		blueprint = domain.BlueprintPayload{
-			ProjectOverview: resp.Content,
-			FileTree:        []string{"main.go"},
-			KeyComponents:   []string{"Main Service"},
-		}
+	cleaned := CleanJSON(resp.Content)
+	if err := json.Unmarshal([]byte(cleaned), &blueprint); err != nil {
+		// Writing the model's prose into a fake file tree would fabricate a
+		// project the user never asked for, so surface the problem instead.
+		return nil, fmt.Errorf("architect returned an invalid blueprint: %w (content: %s)", err, resp.Content)
 	}
 
 	sCtx.Blueprint = &blueprint
@@ -72,6 +170,13 @@ Your role:
 		})
 	}
 
-	summary := fmt.Sprintf("Architect prepared blueprint with %d files planned.", len(blueprint.FileTree))
-	return a.createMessage(sCtx, domain.MsgBlueprint, blueprint, summary)
+	summary := strings.TrimSpace(blueprint.ProjectOverview)
+	if summary == "" {
+		summary = fmt.Sprintf("معماری و ساختار پروژه با %d فایل طراحی شد.", len(blueprint.FileTree))
+	}
+	reason := resp.Reasoning
+	if reason == "" {
+		reason = "تحلیل نیازمندی‌ها، لایه‌بندی معماری و ساختار فایل‌های پروژه."
+	}
+	return a.createMessageWithReasoning(sCtx, domain.MsgBlueprint, blueprint, summary, reason)
 }

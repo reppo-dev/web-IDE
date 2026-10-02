@@ -13,6 +13,7 @@ class WebSocketClient {
 
   constructor(url: string = `ws://${window.location.hostname}:8080/ws`) {
     this.url = url;
+    (window as any).__wsClient = this;
   }
 
   public connect() {

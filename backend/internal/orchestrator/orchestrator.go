@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 
@@ -98,6 +99,11 @@ func NewOrchestrator(
 	}
 }
 
+// GetBaseDir returns the base directory of the orchestrator.
+func (o *Orchestrator) GetBaseDir() string {
+	return o.baseDir
+}
+
 // Subscribe returns a channel that receives live swarm events.
 func (o *Orchestrator) Subscribe() chan SwarmEvent {
 	o.eventsMu.Lock()
@@ -135,20 +141,84 @@ func (o *Orchestrator) broadcast(evt SwarmEvent) {
 
 // Run executes the swarm using the configured mode until consensus is reached or max rounds hit.
 func (o *Orchestrator) Run(ctx context.Context, projectID string, userPrompt string) (*agent.SwarmContext, error) {
-	return o.RunWithMode(ctx, projectID, userPrompt, o.config.Mode)
+	return o.RunWithOptions(ctx, projectID, userPrompt, o.config.Mode, nil, nil)
 }
 
 // RunWithMode executes the swarm using a dynamic execution mode.
 func (o *Orchestrator) RunWithMode(ctx context.Context, projectID string, userPrompt string, mode domain.ExecutionMode) (*agent.SwarmContext, error) {
+	return o.RunWithOptions(ctx, projectID, userPrompt, mode, nil, nil)
+}
+
+// RunWithOptions executes the swarm with custom mode and per-agent model assignments.
+func (o *Orchestrator) RunWithOptions(ctx context.Context, projectID string, userPrompt string, mode domain.ExecutionMode, agentModels map[domain.AgentRole]string, apiKeys map[string]string) (*agent.SwarmContext, error) {
 	if mode == "" {
 		mode = o.config.Mode
 	}
 	switch mode {
 	case domain.ModeSequential:
-		return o.runSequential(ctx, projectID, userPrompt)
+		return o.runSequential(ctx, projectID, userPrompt, agentModels, apiKeys)
 	case domain.ModeConcurrent:
-		return o.runConcurrent(ctx, projectID, userPrompt)
+		return o.runConcurrent(ctx, projectID, userPrompt, agentModels, apiKeys)
 	default:
-		return o.runRoleBased(ctx, projectID, userPrompt)
+		return o.runRoleBased(ctx, projectID, userPrompt, agentModels, apiKeys)
 	}
 }
+
+// runRelayDiscussion conducts a sequential multi-agent relay discussion where
+// all 5 agents (Architect, Coder, Critic, Security, Arbiter) participate in turn,
+// conversing with each other and formulating the best final answer for the user.
+func (o *Orchestrator) runRelayDiscussion(ctx context.Context, sCtx *agent.SwarmContext, projectID string, archMsg *domain.AgentMessage) (*agent.SwarmContext, error) {
+	history := []*domain.AgentMessage{archMsg}
+
+	steps := []struct {
+		role  domain.AgentRole
+		agent agent.Agent
+		desc  string
+	}{
+		{domain.RoleCoder, o.coder, "در حال بررسی فنی و اضافه کردن دیدگاه مهندسی کد به گفتگو..."},
+		{domain.RoleCritic, o.critic, "در حال ارزیابی نقادانه، بررسی چالش‌ها و نکات قابل تامل..."},
+		{domain.RoleSecurity, o.security, "در حال بررسی جنبه‌های امنیتی، پایداری و استانداردهای حفاظتی..."},
+		{domain.RoleArbiter, o.arbiter, "در حال جمع‌بندی نظرات تمام هوش‌های مصنوعی و تدوین بهترین پاسخ نهایی..."},
+	}
+
+	for _, step := range steps {
+		o.broadcast(SwarmEvent{
+			Type:      EventAgentThinking,
+			ProjectID: projectID,
+			Round:     sCtx.Round,
+			Agent:     step.role,
+			Payload:   step.desc,
+		})
+
+		msg, err := step.agent.Discuss(ctx, sCtx, history)
+		if err != nil {
+			log.Printf("relay discussion step %s error: %v", step.role, err)
+			continue
+		}
+
+		history = append(history, msg)
+		o.broadcast(SwarmEvent{
+			Type:      EventAgentOutput,
+			ProjectID: projectID,
+			Round:     sCtx.Round,
+			Agent:     step.role,
+			Message:   msg,
+		})
+	}
+
+	lastMsg := archMsg
+	if len(history) > 0 {
+		lastMsg = history[len(history)-1]
+	}
+
+	o.broadcast(SwarmEvent{
+		Type:      EventConsensusReached,
+		ProjectID: projectID,
+		Round:     sCtx.Round,
+		Message:   lastMsg,
+		Payload:   sCtx.Intent,
+	})
+
+	return sCtx, nil
+}
+

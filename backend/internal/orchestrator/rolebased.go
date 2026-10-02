@@ -10,18 +10,37 @@ import (
 	"github.com/nexusai/nexusai/backend/internal/workspace"
 )
 
-func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userPrompt string) (*agent.SwarmContext, error) {
+func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userPrompt string, agentModels map[domain.AgentRole]string, apiKeys map[string]string) (*agent.SwarmContext, error) {
 	sCtx := &agent.SwarmContext{
-		ProjectID:  projectID,
-		Round:      1,
-		UserPrompt: userPrompt,
-		MemStore:   o.memStore,
+		ProjectID:   projectID,
+		Round:       1,
+		UserPrompt:  userPrompt,
+		MemStore:    o.memStore,
+		AgentModels: agentModels,
+		APIKeys: apiKeys,
 	}
 
 	// 1. Initialize Disk Workspace with Git tracking
 	ws, err := workspace.NewWorkspace(o.baseDir, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize project workspace: %w", err)
+	}
+
+	// Let agents read the real project before they write anything.
+	sCtx.WorkspacePath = ws.Path()
+
+	// 1B. Load existing files from workspace if present on disk
+	if len(sCtx.CodeFiles) == 0 {
+		existingFiles, _ := ws.LoadFiles()
+		if len(existingFiles) > 0 {
+			sCtx.CodeFiles = existingFiles
+			o.broadcast(SwarmEvent{
+				Type:      EventCodeUpdated,
+				ProjectID: projectID,
+				Round:     1,
+				Files:     existingFiles,
+			})
+		}
 	}
 
 	for round := 1; round <= o.config.MaxRounds; round++ {
@@ -39,6 +58,7 @@ func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userP
 				ProjectID: projectID,
 				Round:     round,
 				Agent:     domain.RoleArchitect,
+				Payload:   "در حال تحلیل نیازمندی‌ها، طراحی معماری و ساختار فایل‌های پروژه...",
 			})
 			archMsg, err := o.architect.Execute(ctx, sCtx)
 			if err != nil {
@@ -51,6 +71,12 @@ func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userP
 				Agent:     domain.RoleArchitect,
 				Message:   archMsg,
 			})
+
+			// If triage decided this was conversational or question (not build),
+			// conduct the sequential relay discussion across all 5 agents.
+			if sCtx.Intent != nil && sCtx.Intent.Kind != domain.IntentBuild {
+				return o.runRelayDiscussion(ctx, sCtx, projectID, archMsg)
+			}
 		}
 
 		// PHASE 2A: Lead Coder generates or refactors code
@@ -59,6 +85,7 @@ func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userP
 			ProjectID: projectID,
 			Round:     round,
 			Agent:     domain.RoleCoder,
+			Payload:   "در حال پیاده‌سازی و کدنویسی فایل‌های پروژه بدون کدهای ناقص و placeholder...",
 		})
 		coderMsg, err := o.coder.Execute(ctx, sCtx)
 		if err != nil {
@@ -119,6 +146,7 @@ func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userP
 				ProjectID: projectID,
 				Round:     round,
 				Agent:     domain.RoleCritic,
+				Payload:   "در حال بازبینی موشکافانه کدهای نوشته‌شده، کشف باگ‌ها و لبه‌های تست...",
 			})
 			criticMsg, criticErr = o.critic.Execute(ctx, sCtx)
 			if criticErr == nil {
@@ -139,6 +167,7 @@ func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userP
 				ProjectID: projectID,
 				Round:     round,
 				Agent:     domain.RoleSecurity,
+				Payload:   "در حال ممیزی امنیتی کد، اعتبارسنجی ورودی‌ها و جلوگیری از آسیب‌پذیری‌ها...",
 			})
 			secMsg, secErr = o.security.Execute(ctx, sCtx)
 			if secErr == nil {
@@ -161,25 +190,13 @@ func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userP
 			return nil, fmt.Errorf("role-based [phase 2b]: security audit failed: %w", secErr)
 		}
 
-		// PHASE 2C: Full N-to-N Peer Cross-Examination (Every agent reviews the other 4)
-		if o.matrixEngine != nil {
-			matrix, err := o.matrixEngine.ExecuteCrossExamination(ctx, sCtx)
-			if err == nil {
-				o.broadcast(SwarmEvent{
-					Type:      EventAgentOutput,
-					ProjectID: projectID,
-					Round:     round,
-					Payload:   matrix,
-				})
-			}
-		}
-
 		// PHASE 3: Arbiter Evaluates Consensus
 		o.broadcast(SwarmEvent{
 			Type:      EventAgentThinking,
 			ProjectID: projectID,
 			Round:     round,
 			Agent:     domain.RoleArbiter,
+			Payload:   "در حال ارزیابی ۵ بُعدی، تجمیع بازخوردها و صدور رأی نهایی اجماع...",
 		})
 		arbMsg, err := o.arbiter.Execute(ctx, sCtx)
 		if err != nil {
@@ -233,3 +250,4 @@ func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userP
 
 	return sCtx, nil
 }
+

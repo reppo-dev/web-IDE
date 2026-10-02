@@ -132,19 +132,28 @@ func (s *WSServer) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 		switch clientMsg.Action {
 		case "start_swarm":
+			log.Printf("WS RECEIVED start_swarm: project=%s prompt=%s payload=%s", clientMsg.ProjectID, clientMsg.UserPrompt, string(clientMsg.Payload))
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 				defer cancel()
 
 				var payload struct {
-					Mode string `json:"mode"`
+					Mode    string            `json:"mode"`
+					Models  map[string]string `json:"models"`
+					APIKeys map[string]string `json:"apiKeys"`
 				}
 				if len(clientMsg.Payload) > 0 {
 					_ = json.Unmarshal(clientMsg.Payload, &payload)
 				}
 
+				models := make(map[domain.AgentRole]string)
+				for k, v := range payload.Models {
+					models[domain.AgentRole(k)] = v
+				}
+
 				mode := domain.ExecutionMode(payload.Mode)
-				_, err := s.orch.RunWithMode(ctx, clientMsg.ProjectID, clientMsg.UserPrompt, mode)
+				_, err := s.orch.RunWithOptions(ctx, clientMsg.ProjectID, clientMsg.UserPrompt, mode, models, payload.APIKeys)
+				log.Printf("SWARM FINISHED for %s, err=%v", clientMsg.ProjectID, err)
 				if err != nil {
 					errEvt := orchestrator.SwarmEvent{
 						Type:      orchestrator.EventError,

@@ -1,4 +1,3 @@
-import React from 'react';
 import { 
   Minus, 
   Square, 
@@ -8,12 +7,14 @@ import {
   PanelLeft, 
   PanelBottom, 
   PanelRight, 
-  Bot 
+  Bot,
+  FolderOpen
 } from 'lucide-react';
 
 interface TitleBarProps {
   projectName: string;
   onOpenSettings: () => void;
+  onOpenProjectModal: () => void;
   showLeftSidebar: boolean;
   onToggleLeftSidebar: () => void;
   showBottomPanel: boolean;
@@ -26,6 +27,7 @@ interface TitleBarProps {
 export const TitleBar: React.FC<TitleBarProps> = ({
   projectName,
   onOpenSettings,
+  onOpenProjectModal,
   showLeftSidebar,
   onToggleLeftSidebar,
   showBottomPanel,
@@ -46,8 +48,17 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           <span className="text-[10px] text-zinc-600 font-mono">Cursor Edition</span>
         </div>
 
-        <div className="hidden md:flex items-center gap-3 text-[11px] text-zinc-400 ml-2">
-          <span className="hover:text-zinc-200 cursor-pointer">File</span>
+        <button
+          onClick={onOpenProjectModal}
+          className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#1e1e1e] hover:bg-[#282828] text-zinc-300 hover:text-white border border-[#2a2a2a] text-[11px] font-medium transition-colors"
+          title="Open Folder / Project"
+        >
+          <FolderOpen size={12} className="text-indigo-400" />
+          <span>باز کردن پوشه</span>
+        </button>
+
+        <div className="hidden md:flex items-center gap-3 text-[11px] text-zinc-400 ml-1">
+          <span onClick={onOpenProjectModal} className="hover:text-zinc-200 cursor-pointer">File</span>
           <span className="hover:text-zinc-200 cursor-pointer">Edit</span>
           <span className="hover:text-zinc-200 cursor-pointer">Selection</span>
           <span className="hover:text-zinc-200 cursor-pointer">View</span>

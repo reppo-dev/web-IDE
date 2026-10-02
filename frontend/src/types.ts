@@ -42,6 +42,7 @@ export interface AgentMessage {
   type: string;
   content: any;
   summary?: string;
+  reasoning?: string;
   timestamp: string;
 }
 

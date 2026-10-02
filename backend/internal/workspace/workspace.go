@@ -22,7 +22,17 @@ type Workspace struct {
 
 // NewWorkspace creates or attaches to a project directory.
 func NewWorkspace(baseDir, projectID string) (*Workspace, error) {
-	projPath := filepath.Join(baseDir, "workspaces", projectID)
+	projPath := projectID
+	if !filepath.IsAbs(projPath) {
+		// Check if it exists as relative dir in current working dir
+		if stat, err := os.Stat(projPath); err == nil && stat.IsDir() {
+			abs, _ := filepath.Abs(projPath)
+			projPath = abs
+		} else {
+			projPath = filepath.Join(baseDir, "workspaces", projectID)
+		}
+	}
+
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create workspace directory: %w", err)
 	}
@@ -53,12 +63,138 @@ func NewWorkspace(baseDir, projectID string) (*Workspace, error) {
 	return ws, nil
 }
 
+// ProjectPath resolves where a project's workspace lives without creating it.
+// Unlike NewWorkspace it performs no mkdir and no git init, so read-only
+// callers such as the agents' context engine must use this instead.
+func ProjectPath(baseDir, projectID string) string {
+	if filepath.IsAbs(projectID) {
+		return projectID
+	}
+	if stat, err := os.Stat(projectID); err == nil && stat.IsDir() {
+		if abs, err := filepath.Abs(projectID); err == nil {
+			return abs
+		}
+	}
+	return filepath.Join(baseDir, "workspaces", projectID)
+}
+
 // Path returns the absolute path to this project workspace.
 func (w *Workspace) Path() string {
 	return w.projPath
 }
 
+// LoadFiles scans the workspace directory on disk and loads code files into domain.CodeFile.
+func (w *Workspace) LoadFiles() ([]domain.CodeFile, error) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	var files []domain.CodeFile
+	ignoreDirs := map[string]bool{
+		".git":         true,
+		"node_modules": true,
+		"vendor":       true,
+		".next":        true,
+		"dist":         true,
+		"build":        true,
+		".idea":        true,
+		".vscode":      true,
+		"__pycache__":   true,
+		"target":       true,
+		"bin":          true,
+		"obj":          true,
+	}
+
+	langMap := map[string]string{
+		".go":    "go",
+		".ts":    "typescript",
+		".tsx":   "typescript",
+		".js":    "javascript",
+		".jsx":   "javascript",
+		".py":    "python",
+		".html":  "html",
+		".css":   "css",
+		".json":  "json",
+		".md":    "markdown",
+		".yaml":  "yaml",
+		".yml":   "yaml",
+		".sql":   "sql",
+		".sh":    "shell",
+		".rs":    "rust",
+		".java":  "java",
+		".c":     "c",
+		".cpp":   "cpp",
+		".h":     "c",
+		".toml":  "toml",
+		".env":   "plaintext",
+		".txt":   "plaintext",
+	}
+
+	err := filepath.Walk(w.projPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			if ignoreDirs[info.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.Size() > 1024*1024 { // Skip > 1MB
+			return nil
+		}
+
+		ext := strings.ToLower(filepath.Ext(path))
+		baseName := filepath.Base(path)
+		lang, ok := langMap[ext]
+		if !ok && baseName != "Dockerfile" && baseName != "Makefile" {
+			return nil
+		}
+		if !ok {
+			lang = "plaintext"
+		}
+
+		relPath, err := filepath.Rel(w.projPath, path)
+		if err != nil {
+			return nil
+		}
+		relPath = filepath.ToSlash(relPath)
+
+		contentBytes, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		files = append(files, domain.CodeFile{
+			Path:     relPath,
+			Language: lang,
+			Content:  string(contentBytes),
+		})
+		return nil
+	})
+
+	return files, err
+}
+
+// SaveFile writes a single file to disk in the workspace.
+func (w *Workspace) SaveFile(relPath, content string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if err := ValidateCodeFile(relPath, content); err != nil {
+		return err
+	}
+
+	fullPath := filepath.Join(w.projPath, filepath.FromSlash(relPath))
+	dir := filepath.Dir(fullPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(fullPath, []byte(content), 0644)
+}
+
 // SyncFiles writes all generated code files to disk and computes their diffs.
+// Content that is not valid source is skipped with a reason rather than
+// written, so a conversational answer never becomes a broken file.
 func (w *Workspace) SyncFiles(files []domain.CodeFile) ([]domain.CodeFile, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -66,6 +202,15 @@ func (w *Workspace) SyncFiles(files []domain.CodeFile) ([]domain.CodeFile, error
 	var synced []domain.CodeFile
 
 	for _, file := range files {
+		if err := ValidateCodeFile(file.Path, file.Content); err != nil {
+			// Keep the file in the list so the UI can show what was rejected,
+			// but never write invalid content to disk.
+			rejected := file
+			rejected.Diff = "REJECTED: " + err.Error()
+			synced = append(synced, rejected)
+			continue
+		}
+
 		fullPath := filepath.Join(w.projPath, filepath.FromSlash(file.Path))
 		dir := filepath.Dir(fullPath)
 		if err := os.MkdirAll(dir, 0755); err != nil {

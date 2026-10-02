@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -30,14 +31,15 @@ func NewOpenAICompatClient(cfg Config) *OpenAICompatClient {
 	return &OpenAICompatClient{
 		config: cfg,
 		httpClient: &http.Client{
-			Timeout: 90 * time.Second,
+			Timeout: 180 * time.Second,
 		},
 	}
 }
 
 type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role             string `json:"role"`
+	Content          string `json:"content"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 type chatCompletionRequest struct {
@@ -46,6 +48,7 @@ type chatCompletionRequest struct {
 	Temperature    float64         `json:"temperature"`
 	MaxTokens      int             `json:"max_tokens,omitempty"`
 	ResponseFormat *responseFormat `json:"response_format,omitempty"`
+	Stream         *bool           `json:"stream,omitempty"`
 }
 
 type responseFormat struct {
@@ -73,7 +76,11 @@ type chatCompletionResponse struct {
 
 // Generate sends the prompt to the API endpoint and returns the generated content.
 func (c *OpenAICompatClient) Generate(ctx context.Context, req Request) (*Response, error) {
-	url := fmt.Sprintf("%s/chat/completions", c.config.BaseURL)
+	baseURL := c.config.BaseURL
+	if req.BaseURL != "" {
+		baseURL = req.BaseURL
+	}
+	url := fmt.Sprintf("%s/chat/completions", baseURL)
 
 	messages := []chatMessage{}
 	if req.SystemPrompt != "" {
@@ -92,11 +99,18 @@ func (c *OpenAICompatClient) Generate(ctx context.Context, req Request) (*Respon
 		temp = req.Temperature
 	}
 
+	model := c.config.Model
+	if req.Model != "" {
+		model = req.Model
+	}
+
+	streamFalse := false
 	payload := chatCompletionRequest{
-		Model:       c.config.Model,
+		Model:       model,
 		Messages:    messages,
 		Temperature: temp,
 		MaxTokens:   c.config.MaxTokens,
+		Stream:      &streamFalse,
 	}
 
 	if req.JSONSchema != nil {
@@ -115,9 +129,14 @@ func (c *OpenAICompatClient) Generate(ctx context.Context, req Request) (*Respon
 		return nil, fmt.Errorf("failed to create http request: %w", err)
 	}
 
+	apiKey := c.config.APIKey
+	if req.APIKey != "" {
+		apiKey = req.APIKey
+	}
+
 	httpReq.Header.Set("Content-Type", "application/json")
-	if c.config.APIKey != "" {
-		httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.config.APIKey))
+	if apiKey != "" {
+		httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 	}
 
 	resp, err := c.httpClient.Do(httpReq)
@@ -136,8 +155,48 @@ func (c *OpenAICompatClient) Generate(ctx context.Context, req Request) (*Respon
 	}
 
 	var chatResp chatCompletionResponse
-	if err := json.Unmarshal(respBody, &chatResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	trimmedBody := bytes.TrimSpace(respBody)
+
+	if bytes.HasPrefix(trimmedBody, []byte("data:")) || strings.Contains(string(trimmedBody), "\ndata:") {
+		// Server-Sent Events stream: accumulate tokens from chunks
+		var sb strings.Builder
+		var reasonSb strings.Builder
+		lines := strings.Split(string(respBody), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "data:") {
+				continue
+			}
+			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if payload == "" || payload == "[DONE]" {
+				continue
+			}
+			var chunk struct {
+				Choices []struct {
+					Delta struct {
+						Content          string `json:"content"`
+						ReasoningContent string `json:"reasoning_content"`
+					} `json:"delta"`
+				} `json:"choices"`
+			}
+			if err := json.Unmarshal([]byte(payload), &chunk); err == nil && len(chunk.Choices) > 0 {
+				sb.WriteString(chunk.Choices[0].Delta.Content)
+				reasonSb.WriteString(chunk.Choices[0].Delta.ReasoningContent)
+			}
+		}
+		chatResp.Choices = []chatCompletionChoice{
+			{
+				Message: chatMessage{
+					Role:             "assistant",
+					Content:          sb.String(),
+					ReasoningContent: reasonSb.String(),
+				},
+			},
+		}
+	} else {
+		if err := json.Unmarshal(respBody, &chatResp); err != nil {
+			return nil, fmt.Errorf("failed to decode response: %w", err)
+		}
 	}
 
 	if chatResp.Error != nil {
@@ -148,8 +207,23 @@ func (c *OpenAICompatClient) Generate(ctx context.Context, req Request) (*Respon
 		return nil, fmt.Errorf("no completion choices returned")
 	}
 
+	rawContent := chatResp.Choices[0].Message.Content
+	reasoning := chatResp.Choices[0].Message.ReasoningContent
+
+	if strings.Contains(rawContent, "<think>") && strings.Contains(rawContent, "</think>") {
+		sIdx := strings.Index(rawContent, "<think>") + len("<think>")
+		eIdx := strings.Index(rawContent, "</think>")
+		if eIdx > sIdx {
+			if reasoning == "" {
+				reasoning = strings.TrimSpace(rawContent[sIdx:eIdx])
+			}
+			rawContent = strings.TrimSpace(rawContent[:sIdx-len("<think>")] + rawContent[eIdx+len("</think>"):])
+		}
+	}
+
 	return &Response{
-		Content:      chatResp.Choices[0].Message.Content,
+		Content:      rawContent,
+		Reasoning:    reasoning,
 		PromptTokens: chatResp.Usage.PromptTokens,
 		OutputTokens: chatResp.Usage.CompletionTokens,
 	}, nil

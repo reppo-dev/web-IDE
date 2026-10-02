@@ -29,23 +29,25 @@ const (
 type MessageType string
 
 const (
-	MsgBlueprint      MessageType = "blueprint"
-	MsgCodeDraft      MessageType = "code_draft"
-	MsgCriticReview   MessageType = "critic_review"
-	MsgSecurityReport MessageType = "security_report"
-	MsgArbiterVerdict MessageType = "arbiter_verdict"
-	MsgFeedback       MessageType = "feedback"
+	MsgBlueprint         MessageType = "blueprint"
+	MsgCodeDraft         MessageType = "code_draft"
+	MsgCriticReview      MessageType = "critic_review"
+	MsgSecurityReport    MessageType = "security_report"
+	MsgArbiterVerdict    MessageType = "arbiter_verdict"
+	MsgFeedback          MessageType = "feedback"
+	MsgInterAgentDebate  MessageType = "inter_agent_debate"
 )
 
 // AgentMessage represents an event or message exchanged inside the swarm.
 type AgentMessage struct {
 	ID        string          `json:"id"`
 	From      AgentRole       `json:"from"`
-	To        AgentRole       `json:"to"` // Empty means broadcast to all
+	To        AgentRole       `json:"to,omitempty"` // Empty means broadcast to all
 	Round     int             `json:"round"`
 	Type      MessageType     `json:"type"`
 	Content   json.RawMessage `json:"content"`
 	Summary   string          `json:"summary,omitempty"`
+	Reasoning string          `json:"reasoning,omitempty"`
 	Timestamp time.Time       `json:"timestamp"`
 }
 
@@ -89,6 +91,27 @@ type BlueprintPayload struct {
 	KeyComponents   []string   `json:"key_components"`
 	APIContracts    []string   `json:"api_contracts"`
 	Files           []CodeFile `json:"files,omitempty"`
+}
+
+// IntentKind classifies what the user actually asked for, so a greeting or a
+// question is answered conversationally instead of triggering a build.
+type IntentKind string
+
+const (
+	// IntentConversation covers greetings, thanks and small talk.
+	IntentConversation IntentKind = "conversation"
+	// IntentQuestion covers information requests that need no code changes.
+	IntentQuestion IntentKind = "question"
+	// IntentBuild covers requests to create or modify software.
+	IntentBuild IntentKind = "build"
+)
+
+// IntentRoute is the architect's triage decision for a user message.
+type IntentRoute struct {
+	Kind     IntentKind `json:"kind"`
+	Reply    string     `json:"reply"`
+	Reason   string     `json:"reason"`
+	Reworded string     `json:"reworded,omitempty"`
 }
 
 // ReviewIssue represents a bug or edge-case flagged by the Critic or Security auditor.

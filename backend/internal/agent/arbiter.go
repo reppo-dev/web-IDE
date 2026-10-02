@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/nexusai/nexusai/backend/internal/domain"
 	"github.com/nexusai/nexusai/backend/internal/llm"
@@ -65,6 +66,18 @@ func (arb *ArbiterAgent) Execute(ctx context.Context, sCtx *SwarmContext) (*doma
 		})
 	}
 
-	summary := fmt.Sprintf("Arbiter score: %.1f%% (Consensus: %v, Passed: %v).", verdict.FinalScore, verdict.Passed, verdict.Passed)
-	return arb.createMessage(sCtx, domain.MsgArbiterVerdict, verdict, summary)
+	summary := strings.TrimSpace(verdict.Summary)
+	if summary == "" {
+		status := "تایید شد"
+		if !verdict.Passed {
+			status = "نیاز به بازنگری"
+		}
+		summary = fmt.Sprintf("رأی نهایی داور: امتیاز کیفیت %.1f%% (%s)", verdict.FinalScore, status)
+	}
+	reason := verdict.FeedbackToCoder
+	if reason == "" {
+		reason = "ارزیابی تجمیعی کارایی، امنیت و سازگاری کدها برای صدور رأی نهایی."
+	}
+	return arb.createMessageWithReasoning(sCtx, domain.MsgArbiterVerdict, verdict, summary, reason)
 }
+

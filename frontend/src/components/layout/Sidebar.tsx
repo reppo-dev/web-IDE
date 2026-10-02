@@ -93,9 +93,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <div className="w-full space-y-2 pt-2">
                   <button
                     onClick={onNewProject}
-                    className="w-full py-1.5 px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-xs font-medium transition-colors shadow-sm"
+                    className="w-full py-1.5 px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-xs font-medium transition-colors shadow-sm flex items-center justify-center gap-1.5"
                   >
-                    Open or Create Project
+                    <Folder size={13} />
+                    <span>باز کردن پوشه از سیستم (Open Folder)</span>
                   </button>
                 </div>
               </div>

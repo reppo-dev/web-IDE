@@ -40,8 +40,13 @@ func NewMatrixEngine(client llm.Client) *MatrixEngine {
 	return &MatrixEngine{llmClient: client}
 }
 
-// ExecuteCrossExamination runs all pairwise critiques concurrently using Goroutines and channels.
+// ExecuteCrossExamination runs all pairwise critiques concurrently.
 func (m *MatrixEngine) ExecuteCrossExamination(ctx context.Context, sCtx *SwarmContext) (*DebateMatrix, error) {
+	return m.ExecuteCrossExaminationWithCallback(ctx, sCtx, nil)
+}
+
+// ExecuteCrossExaminationWithCallback runs pairwise critiques and invokes a callback for each generated critique.
+func (m *MatrixEngine) ExecuteCrossExaminationWithCallback(ctx context.Context, sCtx *SwarmContext, onCritique func(CrossCritique)) (*DebateMatrix, error) {
 	agents := []domain.AgentRole{
 		domain.RoleArchitect,
 		domain.RoleCoder,
@@ -80,6 +85,9 @@ func (m *MatrixEngine) ExecuteCrossExamination(ctx context.Context, sCtx *SwarmC
 		if c.Agrees {
 			agreeCount++
 		}
+		if onCritique != nil {
+			onCritique(c)
+		}
 	}
 
 	total := len(allCritiques)
@@ -115,22 +123,47 @@ func (m *MatrixEngine) evaluatePair(ctx context.Context, rev, tgt domain.AgentRo
 	// Synthesize prompt for reviewer evaluating target
 	sysPrompt := fmt.Sprintf(`You are the %s evaluating the output of the %s.
 Evaluate their work strictly from your professional perspective:
-- Does it align with architectural goals, code safety, and correctness?
+- Match the language of the conversation (if the user wrote in Persian, write feedback and demanded_fix in fluent Persian).
+- Provide constructive, realistic feedback.
 - Return ONLY valid JSON:
 {
   "agrees": true,
   "score_given": 90.0,
-  "feedback": "Concise review comment",
-  "demanded_fix": "Optional fix if disagrees"
+  "feedback": "Concise review comment in the user's language",
+  "demanded_fix": "Optional fix if disagrees in the user's language"
 }`, rev, tgt)
 
-	userPrompt := fmt.Sprintf("Project: %s\nTarget Agent: %s\nRound: %d\nCode Files Count: %d",
-		sCtx.UserPrompt, tgt, sCtx.Round, len(sCtx.CodeFiles))
+	filesSummary := ""
+	for _, f := range sCtx.CodeFiles {
+		filesSummary += fmt.Sprintf("- %s (%s)\n", f.Path, f.Language)
+	}
+	if filesSummary == "" {
+		filesSummary = "Blueprint stage / in-progress"
+	}
+
+	userPrompt := fmt.Sprintf("Project: %s\nTarget Agent: %s\nRound: %d\nFiles:\n%s",
+		sCtx.UserPrompt, tgt, sCtx.Round, filesSummary)
+
+	model := ""
+	if sCtx != nil && sCtx.AgentModels != nil {
+		model = sCtx.AgentModels[rev]
+	}
+
+	apiKey := ""
+	baseURL := ""
+	route, ok := ResolveProvider(model)
+	if ok && sCtx != nil {
+		apiKey = sCtx.APIKeys[route.apiKeyName]
+		baseURL = route.baseURL
+	}
 
 	resp, err := m.llmClient.Generate(ctx, llm.Request{
+		Model:        model,
 		SystemPrompt: sysPrompt,
 		UserPrompt:   userPrompt,
 		JSONSchema:   map[string]interface{}{"type": "object"},
+		APIKey:       apiKey,
+		BaseURL:      baseURL,
 	})
 
 	if err != nil {
@@ -173,3 +206,4 @@ Evaluate their work strictly from your professional perspective:
 		Timestamp:     time.Now(),
 	}
 }
+
