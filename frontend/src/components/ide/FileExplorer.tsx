@@ -1,6 +1,7 @@
 import React from 'react';
-import { FileCode, Folder, ChevronRight, ChevronDown, Plus, Trash2 } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { CodeFile } from '../../types';
+import { ProjectTree } from './ProjectTree';
 
 interface FileExplorerProps {
   files: CodeFile[];
@@ -8,19 +9,28 @@ interface FileExplorerProps {
   onSelectFile: (path: string) => void;
   onNewFile?: () => void;
   onDeleteFile?: (path: string) => void;
+  /** Root folder name, shown as the tree's top node. */
+  rootName?: string;
 }
 
+/**
+ * FileExplorer is a thin framed wrapper around ProjectTree. The tree itself is
+ * shared with the sidebar so both views collapse and sort identically.
+ */
 export const FileExplorer: React.FC<FileExplorerProps> = ({
   files,
   activeFile,
   onSelectFile,
   onNewFile,
   onDeleteFile,
+  rootName,
 }) => {
   return (
-    <div className="w-64 bg-[#18181b] border-r border-[#27272a] flex flex-col h-full select-none">
+    <div className="w-64 bg-[#18181b] border-r border-[#27272a] flex flex-col h-full select-none shrink-0">
       <div className="p-3 border-b border-[#27272a] flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Project Files</span>
+        <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400 truncate">
+          {rootName || 'Project'}
+        </span>
         {onNewFile && (
           <button
             onClick={onNewFile}
@@ -32,48 +42,18 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-        <div className="flex items-center gap-1.5 px-2 py-1 text-xs text-zinc-400 font-medium">
-          <ChevronDown size={14} />
-          <Folder size={14} className="text-indigo-400" />
-          <span>src</span>
-        </div>
-
+      <div className="flex-1 overflow-y-auto px-1.5">
         {files.length === 0 ? (
           <div className="p-4 text-center text-xs text-zinc-500">
-            No files generated yet.<br />Run a swarm prompt to create files.
+            پروژه‌ای باز نیست یا هنوز فایلی ندارد.
           </div>
         ) : (
-          files.map((file) => {
-            const isActive = activeFile === file.path;
-            return (
-              <div
-                key={file.path}
-                onClick={() => onSelectFile(file.path)}
-                className={`flex items-center justify-between group px-2 py-1.5 rounded text-xs cursor-pointer transition-colors ${
-                  isActive
-                    ? 'bg-indigo-600/20 text-indigo-300 font-medium'
-                    : 'text-zinc-300 hover:bg-zinc-800/60 hover:text-zinc-100'
-                }`}
-              >
-                <div className="flex items-center gap-2 truncate">
-                  <FileCode size={14} className={isActive ? 'text-indigo-400' : 'text-zinc-400'} />
-                  <span className="truncate">{file.path}</span>
-                </div>
-                {onDeleteFile && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteFile(file.path);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-400 text-zinc-500 transition-all"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                )}
-              </div>
-            );
-          })
+          <ProjectTree
+            files={files}
+            activeFile={activeFile}
+            onSelectFile={onSelectFile}
+            onDeleteFile={onDeleteFile}
+          />
         )}
       </div>
     </div>

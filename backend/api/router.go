@@ -6,11 +6,25 @@ import (
 
 	"github.com/nexusai/nexusai/backend/internal/memory"
 	"github.com/nexusai/nexusai/backend/internal/skills"
+	"github.com/nexusai/nexusai/backend/internal/team"
+	"github.com/nexusai/nexusai/backend/internal/workspace"
 )
 
 // Router sets up HTTP endpoints for the IDE backend.
-func NewRouter(ws *WSServer, mem memory.MemoryStore, sm *skills.Manager) http.Handler {
+func NewRouter(ws *WSServer, mem memory.MemoryStore, sm *skills.Manager, teamStore team.Store, projectReg *workspace.Registry) http.Handler {
 	mux := http.NewServeMux()
+
+	teamHandler := NewTeamHandler(teamStore)
+	projectHandler := NewProjectHandler(projectReg)
+
+	// Custom teams endpoints
+	mux.HandleFunc("/api/teams", teamHandler.HandleTeams)
+	mux.HandleFunc("/api/teams/", teamHandler.HandleTeams)
+	mux.HandleFunc("/api/teams/default", teamHandler.HandleDefaultTeam)
+
+	// Opening real folders from disk
+	mux.HandleFunc("/api/projects", projectHandler.HandleProjects)
+	mux.HandleFunc("/api/projects/", projectHandler.HandleProjects)
 
 	// WebSocket streaming endpoint
 	mux.HandleFunc("/ws", ws.HandleWS)

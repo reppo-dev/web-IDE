@@ -36,12 +36,12 @@ func TestWSServer_Connection(t *testing.T) {
 		arch, coder, critic, sec, arb, nil, matrix, t.TempDir(),
 	)
 
-	wsHub := NewWSServer(orch, nil, nil)
+	wsHub := NewWSServer(orch, nil, nil, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go wsHub.Start(ctx)
 
-	router := NewRouter(wsHub, nil, nil)
+	router := NewRouter(wsHub, nil, nil, nil, nil)
 	server := httptest.NewServer(router)
 	defer server.Close()
 

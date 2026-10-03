@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Key, Cpu, Sliders, Check, Shield, Database, ExternalLink } from 'lucide-react';
 import { AVAILABLE_MODELS, SWARM_PRESETS, SwarmPreset } from '../../config/models';
 import { AgentRole } from '../../types';
@@ -11,6 +11,7 @@ interface SettingsModalProps {
     openrouter: string;
     anthropic: string;
     gemini: string;
+    ninerouter: string;
     ollamaUrl: string;
     customBaseUrl: string;
   };
@@ -33,7 +34,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [formData, setFormData] = useState(apiKeys);
   const [savedNote, setSavedNote] = useState(false);
 
-  if (!isOpen) return null;
+  // Re-sync the form whenever the modal opens. Without this the fields kept
+// showing whatever was typed the first time the modal was mounted, so a key
+// that changed elsewhere was never reflected here.
+useEffect(() => {
+  if (isOpen) {
+    setFormData(apiKeys);
+  }
+}, [isOpen, apiKeys]);
+
+if (!isOpen) return null;
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,8 +147,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                   <input
                     type="password"
-                    value={(formData as any).ninerouter || ''}
-                    onChange={(e) => setFormData({ ...formData, ninerouter: e.target.value } as any)}
+                    value={formData.ninerouter || ''}
+                    onChange={(e) => setFormData({ ...formData, ninerouter: e.target.value })}
                     placeholder="sk-..."
                     className="w-full bg-[#1f1f1f] border border-[#2e2e2e] focus:border-indigo-500 rounded p-2 text-zinc-200 outline-none font-mono text-xs"
                   />

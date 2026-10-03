@@ -14,6 +14,10 @@ const (
 	RoleCritic    AgentRole = "critic"
 	RoleSecurity  AgentRole = "security"
 	RoleArbiter   AgentRole = "arbiter"
+	// RoleCustom marks an agent whose behaviour comes entirely from the user's
+	// prompt. It carries no built-in persona, which is what lets a team grow
+	// beyond the shipped roles without new Go code.
+	RoleCustom AgentRole = "custom"
 )
 
 // ExecutionMode defines how the swarm coordinates agent operations.
@@ -36,6 +40,7 @@ const (
 	MsgArbiterVerdict    MessageType = "arbiter_verdict"
 	MsgFeedback          MessageType = "feedback"
 	MsgInterAgentDebate  MessageType = "inter_agent_debate"
+	MsgAgentReport       MessageType = "agent_report"
 )
 
 // AgentMessage represents an event or message exchanged inside the swarm.
@@ -60,6 +65,11 @@ const (
 	MemoryPattern    MemoryType = "pattern"
 	MemoryPreference MemoryType = "preference"
 	MemoryInsight    MemoryType = "insight"
+	MemoryInvariant  MemoryType = "invariant"
+	MemoryFact       MemoryType = "fact"
+	MemoryWarning     MemoryType = "warning"
+	MemoryProposal   MemoryType = "proposal"
+	MemoryContract   MemoryType = "contract"
 )
 
 // MemoryEntry represents a persistent Mem0-style memory block.

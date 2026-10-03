@@ -3,13 +3,22 @@ package orchestrator
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/nexusai/nexusai/backend/internal/agent"
 	"github.com/nexusai/nexusai/backend/internal/domain"
 	"github.com/nexusai/nexusai/backend/internal/workspace"
 )
 
+// domain and workspace are both used below: domain for the agent role and
+// intent constants, workspace for the on-disk project.
+
+// runRoleBased runs the default plan-driven pipeline.
+//
+// The bounded loop that used to live here stopped at MaxRounds, which meant a
+// project with more tasks than rounds could never finish: the team did one
+// slice of work, scored it, and declared victory. It now delegates to
+// runPlanDrivenLoop, which works through the task list and stops only on real
+// completion.
 func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userPrompt string, agentModels map[domain.AgentRole]string, apiKeys map[string]string) (*agent.SwarmContext, error) {
 	sCtx := &agent.SwarmContext{
 		ProjectID:   projectID,
@@ -17,7 +26,7 @@ func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userP
 		UserPrompt:  userPrompt,
 		MemStore:    o.memStore,
 		AgentModels: agentModels,
-		APIKeys: apiKeys,
+		APIKeys:     apiKeys,
 	}
 
 	// 1. Initialize Disk Workspace with Git tracking
@@ -30,10 +39,10 @@ func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userP
 	sCtx.WorkspacePath = ws.Path()
 
 	// 1B. Load existing files from workspace if present on disk
-	if len(sCtx.CodeFiles) == 0 {
+	if len(sCtx.CodeFilesSnapshot()) == 0 {
 		existingFiles, _ := ws.LoadFiles()
 		if len(existingFiles) > 0 {
-			sCtx.CodeFiles = existingFiles
+			sCtx.SetCodeFiles(existingFiles)
 			o.broadcast(SwarmEvent{
 				Type:      EventCodeUpdated,
 				ProjectID: projectID,
@@ -43,211 +52,5 @@ func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userP
 		}
 	}
 
-	for round := 1; round <= o.config.MaxRounds; round++ {
-		sCtx.Round = round
-		o.broadcast(SwarmEvent{
-			Type:      EventRoundStarted,
-			ProjectID: projectID,
-			Round:     round,
-		})
-
-		// PHASE 1: Architect (runs on round 1)
-		if round == 1 {
-			o.broadcast(SwarmEvent{
-				Type:      EventAgentThinking,
-				ProjectID: projectID,
-				Round:     round,
-				Agent:     domain.RoleArchitect,
-				Payload:   "در حال تحلیل نیازمندی‌ها، طراحی معماری و ساختار فایل‌های پروژه...",
-			})
-			archMsg, err := o.architect.Execute(ctx, sCtx)
-			if err != nil {
-				return nil, fmt.Errorf("role-based [phase 1]: architect failed: %w", err)
-			}
-			o.broadcast(SwarmEvent{
-				Type:      EventAgentOutput,
-				ProjectID: projectID,
-				Round:     round,
-				Agent:     domain.RoleArchitect,
-				Message:   archMsg,
-			})
-
-			// If triage decided this was conversational or question (not build),
-			// conduct the sequential relay discussion across all 5 agents.
-			if sCtx.Intent != nil && sCtx.Intent.Kind != domain.IntentBuild {
-				return o.runRelayDiscussion(ctx, sCtx, projectID, archMsg)
-			}
-		}
-
-		// PHASE 2A: Lead Coder generates or refactors code
-		o.broadcast(SwarmEvent{
-			Type:      EventAgentThinking,
-			ProjectID: projectID,
-			Round:     round,
-			Agent:     domain.RoleCoder,
-			Payload:   "در حال پیاده‌سازی و کدنویسی فایل‌های پروژه بدون کدهای ناقص و placeholder...",
-		})
-		coderMsg, err := o.coder.Execute(ctx, sCtx)
-		if err != nil {
-			return nil, fmt.Errorf("role-based [phase 2a]: coder failed: %w", err)
-		}
-
-		// Sync files to physical workspace disk and compute diffs
-		if len(sCtx.CodeFiles) > 0 {
-			syncedFiles, err := ws.SyncFiles(sCtx.CodeFiles)
-			if err == nil {
-				sCtx.CodeFiles = syncedFiles
-			}
-		}
-
-		o.broadcast(SwarmEvent{
-			Type:      EventAgentOutput,
-			ProjectID: projectID,
-			Round:     round,
-			Agent:     domain.RoleCoder,
-			Message:   coderMsg,
-			Files:     sCtx.CodeFiles,
-		})
-		o.broadcast(SwarmEvent{
-			Type:      EventCodeUpdated,
-			ProjectID: projectID,
-			Round:     round,
-			Files:     sCtx.CodeFiles,
-		})
-
-		// Run real compilation verification in sandbox
-		if len(sCtx.CodeFiles) > 0 && o.sandbox != nil {
-			execRes := o.sandbox.VerifyCodebase(ctx, ws.Path(), sCtx.CodeFiles)
-			if !execRes.Success && len(execRes.ErrorsFound) > 0 {
-				if sCtx.CriticReview == nil {
-					sCtx.CriticReview = &domain.CriticPayload{}
-				}
-				for _, compErr := range execRes.ErrorsFound {
-					sCtx.CriticReview.Issues = append(sCtx.CriticReview.Issues, domain.ReviewIssue{
-						Severity:    "critical",
-						File:        "compiler",
-						Description: fmt.Sprintf("Compiler/Syntax failure: %s", compErr),
-					})
-				}
-			}
-		}
-
-		// PHASE 2B: Critic AND Security Auditor run CONCURRENTLY
-		var wg sync.WaitGroup
-		var criticErr, secErr error
-		var criticMsg, secMsg *domain.AgentMessage
-
-		wg.Add(2)
-
-		go func() {
-			defer wg.Done()
-			o.broadcast(SwarmEvent{
-				Type:      EventAgentThinking,
-				ProjectID: projectID,
-				Round:     round,
-				Agent:     domain.RoleCritic,
-				Payload:   "در حال بازبینی موشکافانه کدهای نوشته‌شده، کشف باگ‌ها و لبه‌های تست...",
-			})
-			criticMsg, criticErr = o.critic.Execute(ctx, sCtx)
-			if criticErr == nil {
-				o.broadcast(SwarmEvent{
-					Type:      EventAgentOutput,
-					ProjectID: projectID,
-					Round:     round,
-					Agent:     domain.RoleCritic,
-					Message:   criticMsg,
-				})
-			}
-		}()
-
-		go func() {
-			defer wg.Done()
-			o.broadcast(SwarmEvent{
-				Type:      EventAgentThinking,
-				ProjectID: projectID,
-				Round:     round,
-				Agent:     domain.RoleSecurity,
-				Payload:   "در حال ممیزی امنیتی کد، اعتبارسنجی ورودی‌ها و جلوگیری از آسیب‌پذیری‌ها...",
-			})
-			secMsg, secErr = o.security.Execute(ctx, sCtx)
-			if secErr == nil {
-				o.broadcast(SwarmEvent{
-					Type:      EventAgentOutput,
-					ProjectID: projectID,
-					Round:     round,
-					Agent:     domain.RoleSecurity,
-					Message:   secMsg,
-				})
-			}
-		}()
-
-		wg.Wait()
-
-		if criticErr != nil {
-			return nil, fmt.Errorf("role-based [phase 2b]: critic review failed: %w", criticErr)
-		}
-		if secErr != nil {
-			return nil, fmt.Errorf("role-based [phase 2b]: security audit failed: %w", secErr)
-		}
-
-		// PHASE 3: Arbiter Evaluates Consensus
-		o.broadcast(SwarmEvent{
-			Type:      EventAgentThinking,
-			ProjectID: projectID,
-			Round:     round,
-			Agent:     domain.RoleArbiter,
-			Payload:   "در حال ارزیابی ۵ بُعدی، تجمیع بازخوردها و صدور رأی نهایی اجماع...",
-		})
-		arbMsg, err := o.arbiter.Execute(ctx, sCtx)
-		if err != nil {
-			return nil, fmt.Errorf("role-based [phase 3]: arbiter judgment failed: %w", err)
-		}
-
-		// Check for oscillation/stalemate
-		if o.detector != nil && sCtx.ArbiterVerdict != nil {
-			o.detector.RecordRound(round, sCtx.ArbiterVerdict.FinalScore)
-			if o.detector.IsStalemate() {
-				resolvedScore, note := o.detector.ResolveStalemate(sCtx.ArbiterVerdict.FinalScore)
-				sCtx.ArbiterVerdict.FinalScore = resolvedScore
-				sCtx.ArbiterVerdict.Passed = resolvedScore >= sCtx.ArbiterVerdict.Threshold
-				sCtx.ArbiterVerdict.Summary += " [" + note + "]"
-			}
-		}
-
-		// Git auto-commit this round
-		if sCtx.ArbiterVerdict != nil {
-			_, _ = ws.CommitRound(ctx, round, sCtx.ArbiterVerdict.FinalScore, sCtx.ArbiterVerdict.Summary)
-		}
-
-		o.broadcast(SwarmEvent{
-			Type:      EventAgentOutput,
-			ProjectID: projectID,
-			Round:     round,
-			Agent:     domain.RoleArbiter,
-			Message:   arbMsg,
-			Verdict:   sCtx.ArbiterVerdict,
-		})
-
-		o.broadcast(SwarmEvent{
-			Type:      EventRoundComplete,
-			ProjectID: projectID,
-			Round:     round,
-			Verdict:   sCtx.ArbiterVerdict,
-		})
-
-		// Check Consensus
-		if sCtx.ArbiterVerdict != nil && sCtx.ArbiterVerdict.Passed {
-			o.broadcast(SwarmEvent{
-				Type:      EventConsensusReached,
-				ProjectID: projectID,
-				Round:     round,
-				Verdict:   sCtx.ArbiterVerdict,
-				Files:     sCtx.CodeFiles,
-			})
-			return sCtx, nil
-		}
-	}
-
-	return sCtx, nil
+	return o.runPlanDrivenLoop(ctx, sCtx, projectID, ws)
 }
-

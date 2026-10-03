@@ -8,6 +8,7 @@ import (
 
 	"github.com/nexusai/nexusai/backend/internal/agent"
 	"github.com/nexusai/nexusai/backend/internal/domain"
+	"github.com/nexusai/nexusai/backend/internal/llm"
 	"github.com/nexusai/nexusai/backend/internal/memory"
 	"github.com/nexusai/nexusai/backend/internal/sandbox"
 	"github.com/nexusai/nexusai/backend/internal/scoring"
@@ -24,19 +25,21 @@ const (
 	EventConsensusReached EventType = "consensus_reached"
 	EventCodeUpdated      EventType = "code_updated"
 	EventError            EventType = "error"
+	EventPlanUpdated      EventType = "plan_updated"
 )
 
 // SwarmEvent is the real-time event dispatched during swarm execution.
 type SwarmEvent struct {
-	Type      EventType            `json:"type"`
-	ProjectID string               `json:"project_id"`
-	Round     int                  `json:"round"`
-	Agent     domain.AgentRole     `json:"agent,omitempty"`
-	Message   *domain.AgentMessage `json:"message,omitempty"`
+	Type      EventType              `json:"type"`
+	ProjectID string                 `json:"project_id"`
+	Round     int                    `json:"round"`
+	Agent     domain.AgentRole       `json:"agent,omitempty"`
+	Message   *domain.AgentMessage   `json:"message,omitempty"`
 	Verdict   *domain.ArbiterVerdict `json:"verdict,omitempty"`
-	Files     []domain.CodeFile    `json:"files,omitempty"`
-	Payload   interface{}          `json:"payload,omitempty"`
-	Timestamp time.Time            `json:"timestamp"`
+	Files     []domain.CodeFile      `json:"files,omitempty"`
+	Payload   interface{}            `json:"payload,omitempty"`
+	Plan      *domain.ProjectPlan    `json:"plan,omitempty"`
+	Timestamp time.Time              `json:"timestamp"`
 }
 
 // Config holds runtime parameters for the orchestrator.
@@ -54,6 +57,9 @@ type Orchestrator struct {
 	security  agent.Agent
 	arbiter   agent.Agent
 	memStore  memory.MemoryStore
+	// client builds user-defined team agents that are not one of the five
+	// built-in personas.
+	client llm.Client
 
 	matrixEngine *agent.MatrixEngine
 	sandbox      *sandbox.Runner
@@ -97,6 +103,12 @@ func NewOrchestrator(
 		baseDir:      baseDir,
 		subscribers:  make([]chan SwarmEvent, 0),
 	}
+}
+
+// SetLLMClient registers the client used to build user-defined team agents.
+// It is separate from the constructor so existing call sites keep working.
+func (o *Orchestrator) SetLLMClient(c llm.Client) {
+	o.client = c
 }
 
 // GetBaseDir returns the base directory of the orchestrator.
@@ -168,7 +180,12 @@ func (o *Orchestrator) RunWithOptions(ctx context.Context, projectID string, use
 // all 5 agents (Architect, Coder, Critic, Security, Arbiter) participate in turn,
 // conversing with each other and formulating the best final answer for the user.
 func (o *Orchestrator) runRelayDiscussion(ctx context.Context, sCtx *agent.SwarmContext, projectID string, archMsg *domain.AgentMessage) (*agent.SwarmContext, error) {
-	history := []*domain.AgentMessage{archMsg}
+	// A nil architect message would put a hole in the history the other agents
+	// read, so the relay starts from only the messages that exist.
+	var history []*domain.AgentMessage
+	if archMsg != nil {
+		history = append(history, archMsg)
+	}
 
 	steps := []struct {
 		role  domain.AgentRole

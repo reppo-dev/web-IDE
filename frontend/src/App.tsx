@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { TitleBar } from './components/layout/TitleBar';
 import { ActivityBar, SidebarView } from './components/layout/ActivityBar';
 import { Sidebar } from './components/layout/Sidebar';
@@ -17,9 +17,14 @@ import {
   ExecutionMode, 
   ReviewIssue, 
   MemoryEntry, 
-  SkillManifest 
+  SkillManifest,
+  ProjectPlan
 } from './types';
 import { SwarmPreset, SWARM_PRESETS } from './config/models';
+import { TeamBuilderModal } from './components/teams/TeamBuilderModal';
+import { Team } from './types/team';
+import { OpenProjectModal } from './components/projects/OpenProjectModal';
+import { ProjectRef, ProjectTree, ProjectFileContent } from './types/project';
 import { Wifi, WifiOff, GitBranch, Scale, Terminal as TermIcon } from 'lucide-react';
 
 /** The five swarm personas. Every one must be assigned a model by the user. */
@@ -27,7 +32,9 @@ const AGENT_ROLES = ['architect', 'coder', 'critic', 'security', 'arbiter'] as c
 
 export const App: React.FC = () => {
   // Project & Layout State
+  const [projectId, setProjectId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState<string | null>(null);
+  const [projectPlan, setProjectPlan] = useState<ProjectPlan | null>(null);
   const [activeSidebarView, setActiveSidebarView] = useState<SidebarView>('explorer');
   const [showLeftSidebar, setShowLeftSidebar] = useState<boolean>(true);
   const [showBottomPanel, setShowBottomPanel] = useState<boolean>(false);
@@ -95,11 +102,7 @@ export const App: React.FC = () => {
   };
 
   const [apiKeys, setApiKeys] = useState(() => {
-    const saved = localStorage.getItem('nexusai_api_keys');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
-    }
-    return {
+    const defaults = {
       openai: '',
       openrouter: '',
       anthropic: '',
@@ -108,9 +111,25 @@ export const App: React.FC = () => {
       ollamaUrl: 'http://localhost:11434/v1',
       customBaseUrl: '',
     };
+    const saved = localStorage.getItem('nexusai_api_keys');
+    if (saved) {
+      try {
+        // Merge over the defaults: an older saved payload may be missing keys
+        // that were added later, and undefined would render as an uncontrolled
+        // input.
+        return { ...defaults, ...JSON.parse(saved) };
+      } catch (e) {}
+    }
+    return defaults;
   });
 
   const [memories, setMemories] = useState<MemoryEntry[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [selectedTeamId, setSelectedTeamId] = useState<string>('default');
+  const [showTeamBuilder, setShowTeamBuilder] = useState<boolean>(false);
+  const [projects, setProjects] = useState<ProjectRef[]>([]);
+  const [activeProject, setActiveProject] = useState<ProjectRef | null>(null);
+  const [showOpenProject, setShowOpenProject] = useState<boolean>(false);
   const [skills, setSkills] = useState<SkillManifest[]>([
     {
       name: "docker-deploy",
@@ -170,10 +189,28 @@ export const App: React.FC = () => {
         case 'round_started':
           setCurrentRound(event.round);
           setIsRunning(true);
+          // A new round means the swarm is responsive again.
+          setStalled(false);
+          if (event.plan) {
+            setProjectPlan(event.plan);
+          }
           setTerminalLogs((prev) => [...prev, `[Swarm] Round ${event.round} started...`]);
           break;
 
         case 'agent_thinking':
+          // The manager reports which pipeline is running. Surfacing it makes
+          // it obvious when a selected team was silently ignored.
+          if (event.agent === 'manager' && typeof event.payload === 'string') {
+            const path = event.payload;
+            const isTeam = path.startsWith('team:');
+            setTerminalLogs((prev) => [
+              ...prev,
+              isTeam
+                ? `[Manager] تیم دلخواه در حال اجرا: ${path.slice(5)}`
+                : '[Manager] اجرای تیم پیش‌فرض ۵ نفره (تیم دلخواه اعمال نشد)',
+            ]);
+            break;
+          }
           if (event.payload) {
             const role = event.agent || 'ai';
             const status = typeof event.payload === 'string' ? event.payload : (event.payload.status || 'در حال تحلیل...');
@@ -222,6 +259,9 @@ export const App: React.FC = () => {
           if (event.files) {
             setFiles(event.files);
           }
+          if (event.plan) {
+            setProjectPlan(event.plan);
+          }
           setIsRunning(false);
           setTerminalLogs((prev) => [
             ...prev,
@@ -229,15 +269,58 @@ export const App: React.FC = () => {
           ]);
           break;
 
+        case 'plan_updated':
+          if (event.plan) {
+            setProjectPlan(event.plan);
+            const done = event.plan.tasks.filter((t: any) => t.state === 'DONE').length;
+            const total = event.plan.tasks.length;
+            setTerminalLogs((prev) => [
+              ...prev,
+              `[Plan] پیشرفت: ${done}/${total} تسک تکمیل شد.`,
+            ]);
+          }
+          break;
+
         case 'error':
           setIsRunning(false);
           setThinkingAgent(null);
+          setStalled(false);
           setTerminalLogs((prev) => [...prev, `[Error] ${event.payload || 'Swarm error'}`]);
           break;
 
-        case 'round_started':
-          // A new round clears the stalled flag.
-          setStalled(false);
+        case 'teams_data':
+          setTeams(event.teams || []);
+          if (event.default_team_id) {
+            // Adopt the server's default once, but never override a team the
+            // user has already picked.
+            const adopted = (current: string) =>
+              current && current !== 'default' ? current : event.default_team_id!;
+            setSelectedTeamId(adopted);
+          }
+          break;
+
+        case 'team_saved':
+          if (event.team) {
+            const saved = event.team as Team;
+            setTeams((prev) => {
+              const idx = prev.findIndex((t) => t.id === saved.id);
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = saved;
+                return next;
+              }
+              return [...prev, saved];
+            });
+            if (!saved.id) {
+              setSelectedTeamId(saved.id);
+            }
+            setTerminalLogs((prev) => [...prev, `[Team] ذخیره شد: ${saved.name}`]);
+          }
+          break;
+
+        case 'team_deleted':
+          setTeams((prev) => prev.filter((t) => t.id !== event.team_id));
+          setTerminalLogs((prev) => [...prev, `[Team] حذف شد.`]);
           break;
       }
     });
@@ -254,6 +337,88 @@ export const App: React.FC = () => {
   const handleSaveApiKeys = (keys: any) => {
     setApiKeys(keys);
     localStorage.setItem('nexusai_api_keys', JSON.stringify(keys));
+  };
+
+  // ---- Custom teams ----
+  const handleSaveTeam = (team: Team): Promise<void> => {
+    return new Promise((resolve) => {
+      // Save over HTTP so validation errors come back with a real message
+      // instead of a silently ignored WebSocket frame.
+      fetch('/api/teams', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(team),
+      })
+        .then(async (res) => {
+          const text = await res.text();
+          if (!res.ok) {
+            let msg = text || `HTTP ${res.status}`;
+            try {
+              const parsed = JSON.parse(text);
+              msg = parsed.error || parsed.message || msg;
+            } catch (e) {}
+            throw new Error(msg);
+          }
+          const saved: Team = JSON.parse(text);
+          setTeams((prev) => {
+            const idx = prev.findIndex((t) => t.id === saved.id && saved.id);
+            if (idx >= 0) {
+              const next = [...prev];
+              next[idx] = saved;
+              return next;
+            }
+            return [...prev, saved];
+          });
+          setSelectedTeamId(saved.id);
+          resolve();
+        })
+        .catch((e) => {
+          // Surface the failure through the modal's own error state.
+          throw e;
+        });
+    });
+  };
+
+  // ---- Projects on disk ----
+  const loadProjectList = useCallback(async () => {
+    try {
+      const res = await fetch('/api/projects');
+      if (!res.ok) return;
+      const data: ProjectRef[] = await res.json();
+      setProjects(Array.isArray(data) ? data : []);
+    } catch (e) {
+      // The daemon may not be running yet; the modal will report the real error.
+    }
+  }, []);
+
+  useEffect(() => {
+    loadProjectList();
+  }, [loadProjectList]);
+
+  const handleOpenProject = async (path: string): Promise<ProjectRef> => {
+    const ref = await handleOpenFolder(path);
+    await loadProjectList();
+    return ref;
+  };
+
+  const handleSelectProject = async (ref: ProjectRef) => {
+    await handleOpenFolder(ref.root);
+  };
+
+  const handleDeleteTeam = async (teamId: string) => {
+    try {
+      const res = await fetch(`/api/teams/${teamId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      setTeams((prev) => prev.filter((t) => t.id !== teamId));
+      if (selectedTeamId === teamId) {
+        setSelectedTeamId('default');
+      }
+    } catch (e: any) {
+      setTerminalLogs((prev) => [...prev, `[Team] حذف ناموفق: ${e?.message || e}`]);
+    }
   };
 
   const handleCreateProject = (name: string, template: string) => {
@@ -276,11 +441,113 @@ export const App: React.FC = () => {
     setTerminalLogs((prev) => [...prev, `[Project] Opened project: ${name} (${template})`]);
   };
 
-  const handleSelectFile = (path: string) => {
+  const handleSelectFile = async (path: string, pid?: string) => {
+    const currentPid = pid || projectId;
     if (!openFiles.includes(path)) {
       setOpenFiles((prev) => [...prev, path]);
     }
     setActiveFile(path);
+
+    const existing = files.find((f) => f.path === path);
+    if (currentPid && (!existing || !existing.content)) {
+      try {
+        const res = await fetch(`/api/projects/${currentPid}/file?path=${encodeURIComponent(path)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setFiles((prev) => {
+            const idx = prev.findIndex((f) => f.path === path);
+            const updated: CodeFile = {
+              path: data.path || path,
+              language: data.language || 'plaintext',
+              content: data.content || '',
+            };
+            if (idx >= 0) {
+              const copy = [...prev];
+              copy[idx] = updated;
+              return copy;
+            }
+            return [...prev, updated];
+          });
+        }
+      } catch (err) {
+        console.error('Failed to load file content:', err);
+      }
+    }
+  };
+
+  const handleOpenFolder = async (path: string): Promise<ProjectRef> => {
+    try {
+      setTerminalLogs((prev) => [...prev, `[Project] Opening folder: ${path}...`]);
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        let msg = text || `HTTP ${res.status}`;
+        try {
+          const parsed = JSON.parse(text);
+          msg = parsed.error || msg;
+        } catch (e) {}
+        throw new Error(msg);
+      }
+      const ref = await res.json();
+      setProjectId(ref.id);
+      setProjectName(ref.name);
+
+      // Fetch file tree
+      const treeRes = await fetch(`/api/projects/${ref.id}`);
+      if (treeRes.ok) {
+        const tree = await treeRes.json();
+        const treeFiles: CodeFile[] = (tree.files || []).map((f: { path: string }) => {
+          const ext = f.path.split('.').pop()?.toLowerCase() || '';
+          let lang = 'plaintext';
+          if (ext === 'go') lang = 'go';
+          else if (ext === 'ts' || ext === 'tsx') lang = 'typescript';
+          else if (ext === 'js' || ext === 'jsx') lang = 'javascript';
+          else if (ext === 'py') lang = 'python';
+          else if (ext === 'json') lang = 'json';
+          else if (ext === 'md') lang = 'markdown';
+          return {
+            path: f.path,
+            language: lang,
+            content: '',
+          };
+        });
+        setFiles(treeFiles);
+        if (treeFiles.length > 0) {
+          handleSelectFile(treeFiles[0].path, ref.id);
+        } else {
+          setOpenFiles([]);
+          setActiveFile('');
+        }
+        setTerminalLogs((prev) => [
+          ...prev,
+          `[Project] Folder opened: ${ref.name} (${treeFiles.length} files discovered)`,
+        ]);
+
+        // Fetch plan if available
+        try {
+          const planRes = await fetch(`/api/projects/${ref.id}/plan`);
+          if (planRes.ok) {
+            const planData = await planRes.json();
+            if (planData && Array.isArray(planData.tasks) && planData.tasks.length > 0) {
+              setProjectPlan(planData);
+            } else {
+              setProjectPlan(null);
+            }
+          }
+        } catch {
+          setProjectPlan(null);
+        }
+      }
+      return ref;
+    } catch (e: any) {
+      setTerminalLogs((prev) => [...prev, `[Project Error] Failed to open folder: ${e?.message || e}`]);
+      // Propagate so the modal can show why instead of closing silently.
+      throw e;
+    }
   };
 
   const handleCloseTab = (path: string) => {
@@ -295,10 +562,31 @@ export const App: React.FC = () => {
     const trimmed = promptText.trim();
     if (!trimmed) return;
 
-    // Refuse to start the swarm until the user has chosen a model for every
-    // agent. Assigning defaults here would silently pick models and spend
-    // their credits without consent.
-    if (unassignedAgents.length > 0) {
+    // A custom team carries its own per-agent models, so the fixed-role model
+    // picker does not apply. Only the built-in roster needs that check.
+    const activeTeam = teams.find((t) => t.id === selectedTeamId);
+    // A saved team is only "custom" once it is actually loaded. Before the
+    // list arrives every id is unknown, and treating that as the built-in
+    // roster would silently send the old five-agent request instead.
+    const usingCustomTeam = !!activeTeam && selectedTeamId !== 'default';
+
+    if (usingCustomTeam && !activeTeam!.agents.some((a) => a.model)) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `system-${Date.now()}`,
+          from: 'architect',
+          round: currentRound,
+          type: 'error',
+          content: '',
+          summary: `تیم «${activeTeam!.name}» مدل ندارد.`,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+      return;
+    }
+
+    if (!usingCustomTeam && unassignedAgents.length > 0) {
       setMessages((prev) => [
         ...prev,
         {
@@ -315,7 +603,7 @@ export const App: React.FC = () => {
       return;
     }
 
-    const proj = projectName || 'my-nexus-project';
+    const proj = projectId || projectName || 'my-nexus-project';
     if (!projectName) {
       setProjectName(proj);
     }
@@ -336,7 +624,20 @@ export const App: React.FC = () => {
     ]);
 
     // Send to Go backend daemon via WebSocket with individual agent models and API keys
-    wsClient.send('start_swarm', proj, { mode: executionMode, models: agentModels, apiKeys }, trimmed);
+    wsClient.send(
+      'start_swarm',
+      proj,
+      {
+        mode: executionMode,
+        // When a custom team is selected the backend runs that team instead of
+        // the fixed five, so the roster map must not be sent.
+        ...(usingCustomTeam
+          ? { team_id: selectedTeamId }
+          : { models: agentModels }),
+        apiKeys,
+      },
+      trimmed,
+    );
   };
 
   const currentFileObj = files.find((f) => f.path === activeFile) || null;
@@ -354,7 +655,7 @@ export const App: React.FC = () => {
         showComposer={showComposer}
         onToggleComposer={() => setShowComposer(!showComposer)}
         onOpenCommandPalette={() => setIsNewProjectOpen(true)}
-        onOpenProjectModal={() => setIsNewProjectOpen(true)}
+        onOpenProjectModal={() => setShowOpenProject(true)}
       />
 
       {/* 2. Main Workbench Workspace */}
@@ -452,7 +753,13 @@ export const App: React.FC = () => {
               logs={terminalLogs}
               onClear={() => setTerminalLogs([])}
               onRunCommand={(cmd) => {
-                setTerminalLogs((prev) => [...prev, cmd, `[exec] Command executed in workspace.`]);
+                // The daemon exposes no shell endpoint, so be explicit rather
+                // than echoing a fake success line the user would trust.
+                setTerminalLogs((prev) => [
+                  ...prev,
+                  `> ${cmd}`,
+                  '[error] Shell execution is not wired up yet. Run the command in your own terminal.',
+                ]);
               }}
             />
           )}
@@ -476,8 +783,36 @@ export const App: React.FC = () => {
             thinkingAgent={thinkingAgent}
             stalled={stalled}
             connected={isConnected}
+            teams={teams}
+            selectedTeamId={selectedTeamId}
+            onSelectTeam={setSelectedTeamId}
+            onOpenTeamBuilder={() => setShowTeamBuilder(true)}
+            plan={projectPlan}
           />
         )}
+
+      {showTeamBuilder && (
+        <TeamBuilderModal
+          isOpen={showTeamBuilder}
+          onClose={() => setShowTeamBuilder(false)}
+          teams={teams}
+          selectedTeamId={selectedTeamId}
+          onSelectTeam={setSelectedTeamId}
+          onSaveTeam={handleSaveTeam}
+          onDeleteTeam={handleDeleteTeam}
+        />
+      )}
+
+      {showOpenProject && (
+        <OpenProjectModal
+          isOpen={showOpenProject}
+          onClose={() => setShowOpenProject(false)}
+          projects={projects}
+          activeProjectId={activeProject?.id || ''}
+          onOpenProject={handleOpenProject}
+          onSelectProject={handleSelectProject}
+        />
+      )}
       </div>
 
       {/* 3. Bottom Status Bar */}
@@ -550,11 +885,7 @@ export const App: React.FC = () => {
         isOpen={isNewProjectOpen}
         onClose={() => setIsNewProjectOpen(false)}
         onCreateProject={handleCreateProject}
-        onOpenFolder={(path) => {
-          setProjectName(path.split(/[\\/]/).pop() || path);
-          setTerminalLogs((prev) => [...prev, `[System] Requesting folder open: ${path}`]);
-          wsClient.send('open_folder', path);
-        }}
+        onOpenFolder={handleOpenFolder}
       />
     </div>
   );

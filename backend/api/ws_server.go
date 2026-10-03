@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/nexusai/nexusai/backend/internal/memory"
 	"github.com/nexusai/nexusai/backend/internal/orchestrator"
 	"github.com/nexusai/nexusai/backend/internal/skills"
+	"github.com/nexusai/nexusai/backend/internal/team"
 )
 
 var upgrader = websocket.Upgrader{
@@ -34,6 +36,7 @@ type WSServer struct {
 	orch       *orchestrator.Orchestrator
 	memStore   memory.MemoryStore
 	skillsMgr  *skills.Manager
+	teamStore  team.Store
 	clients    map[*websocket.Conn]bool
 	clientsMu  sync.RWMutex
 	register   chan *websocket.Conn
@@ -42,16 +45,41 @@ type WSServer struct {
 }
 
 // NewWSServer creates a new WebSocket hub.
-func NewWSServer(orch *orchestrator.Orchestrator, mem memory.MemoryStore, sm *skills.Manager) *WSServer {
+func NewWSServer(orch *orchestrator.Orchestrator, mem memory.MemoryStore, sm *skills.Manager, ts team.Store) *WSServer {
 	return &WSServer{
 		orch:       orch,
 		memStore:   mem,
 		skillsMgr:  sm,
+		teamStore:  ts,
 		clients:    make(map[*websocket.Conn]bool),
 		register:   make(chan *websocket.Conn),
 		unregister: make(chan *websocket.Conn),
 		broadcast:  make(chan []byte, 100),
 	}
+}
+
+// reply sends a JSON response to one client.
+func reply(conn *websocket.Conn, payload interface{}) {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	_ = conn.WriteMessage(websocket.TextMessage, b)
+}
+
+// resolveTeam finds the team a project should use: the explicit request wins,
+// then the project binding, then the global default.
+func (s *WSServer) resolveTeam(ctx context.Context, projectID, requestedID string) (*domain.Team, error) {
+	if s.teamStore == nil {
+		return nil, errors.New("team store is not available")
+	}
+
+	if requestedID != "" {
+		return s.teamStore.Get(ctx, requestedID)
+	}
+
+	// Fall back to the default so a project that was never configured still runs.
+	return s.teamStore.GetDefault(ctx)
 }
 
 // Start begins the event loop forwarding events to connected clients.
@@ -119,6 +147,17 @@ func (s *WSServer) HandleWS(w http.ResponseWriter, r *http.Request) {
 		s.unregister <- conn
 	}()
 
+	// Push available teams to newly connected client immediately
+	if s.teamStore != nil {
+		if teams, err := s.teamStore.List(context.Background()); err == nil {
+			reply(conn, map[string]interface{}{
+				"type":            "teams_data",
+				"teams":           teams,
+				"default_team_id": "default",
+			})
+		}
+	}
+
 	for {
 		_, msgBytes, err := conn.ReadMessage()
 		if err != nil {
@@ -131,8 +170,60 @@ func (s *WSServer) HandleWS(w http.ResponseWriter, r *http.Request) {
 		}
 
 		switch clientMsg.Action {
+		case "list_teams":
+			if s.teamStore == nil {
+				reply(conn, map[string]interface{}{"type": "teams_data", "teams": []interface{}{}})
+				break
+			}
+			teams, err := s.teamStore.List(context.Background())
+			if err != nil {
+				reply(conn, map[string]interface{}{"type": "error", "message": err.Error()})
+				break
+			}
+			def, _ := s.teamStore.GetDefault(context.Background())
+			defID := ""
+			if def != nil {
+				defID = def.ID
+			}
+			reply(conn, map[string]interface{}{
+				"type":           "teams_data",
+				"teams":          teams,
+				"default_team_id": defID,
+			})
+
+		case "save_team":
+			var t domain.Team
+			if err := json.Unmarshal(clientMsg.Payload, &t); err != nil {
+				reply(conn, map[string]interface{}{"type": "error", "message": "invalid team payload: " + err.Error()})
+				break
+			}
+			if s.teamStore == nil {
+				reply(conn, map[string]interface{}{"type": "error", "message": "team store unavailable"})
+				break
+			}
+			if err := s.teamStore.Save(context.Background(), &t); err != nil {
+				reply(conn, map[string]interface{}{"type": "error", "message": err.Error()})
+				break
+			}
+			reply(conn, map[string]interface{}{"type": "team_saved", "team": t})
+
+		case "delete_team":
+			var payload struct {
+				TeamID string `json:"team_id"`
+			}
+			_ = json.Unmarshal(clientMsg.Payload, &payload)
+			if s.teamStore == nil || payload.TeamID == "" {
+				reply(conn, map[string]interface{}{"type": "error", "message": "team id required"})
+				break
+			}
+			if err := s.teamStore.Delete(context.Background(), payload.TeamID); err != nil {
+				reply(conn, map[string]interface{}{"type": "error", "message": err.Error()})
+				break
+			}
+			reply(conn, map[string]interface{}{"type": "team_deleted", "team_id": payload.TeamID})
+
 		case "start_swarm":
-			log.Printf("WS RECEIVED start_swarm: project=%s prompt=%s payload=%s", clientMsg.ProjectID, clientMsg.UserPrompt, string(clientMsg.Payload))
+			log.Printf("WS RECEIVED start_swarm: project=%s prompt=%s", clientMsg.ProjectID, clientMsg.UserPrompt)
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 				defer cancel()
@@ -141,9 +232,63 @@ func (s *WSServer) HandleWS(w http.ResponseWriter, r *http.Request) {
 					Mode    string            `json:"mode"`
 					Models  map[string]string `json:"models"`
 					APIKeys map[string]string `json:"apiKeys"`
+					TeamID  string            `json:"team_id"`
 				}
 				if len(clientMsg.Payload) > 0 {
 					_ = json.Unmarshal(clientMsg.Payload, &payload)
+				}
+
+				mode := domain.ExecutionMode(payload.Mode)
+
+				// Tell the client which pipeline is about to run. Without this
+				// the UI looks identical whether the selected team ran or the
+				// legacy five-agent roster did, which made a silently ignored
+				// team look like a broken model.
+				runPath := "swarm"
+				if payload.TeamID != "" {
+					runPath = "team:" + payload.TeamID
+				}
+				log.Printf("RUN START project=%s path=%s team_id=%q models_sent=%v",
+					clientMsg.ProjectID, runPath, payload.TeamID, payload.Models != nil)
+				b, _ := json.Marshal(orchestrator.SwarmEvent{
+					Type:      orchestrator.EventAgentThinking,
+					ProjectID: clientMsg.ProjectID,
+					Agent:     "manager",
+					Payload:   runPath,
+				})
+				_ = conn.WriteMessage(websocket.TextMessage, b)
+
+				// A user-built team takes over the whole pipeline: its agents,
+				// its model per agent, and its consensus threshold.
+				if payload.TeamID != "" || (s.teamStore != nil && payload.Models == nil) {
+					selected, err := s.resolveTeam(ctx, clientMsg.ProjectID, payload.TeamID)
+					if err != nil {
+						log.Printf("team resolve failed: %v", err)
+						b, _ := json.Marshal(orchestrator.SwarmEvent{
+							Type:      orchestrator.EventError,
+							ProjectID: clientMsg.ProjectID,
+							Payload:   "team not found: " + err.Error(),
+						})
+						conn.WriteMessage(websocket.TextMessage, b)
+						return
+					}
+					if _, err := s.orch.RunTeam(ctx, clientMsg.ProjectID, clientMsg.UserPrompt,
+						orchestrator.TeamRun{
+							Team:    selected,
+							Mode:    mode,
+							APIKeys: payload.APIKeys,
+						}); err != nil {
+						log.Printf("TEAM RUN FAILED for %s: %v", clientMsg.ProjectID, err)
+						b, _ := json.Marshal(orchestrator.SwarmEvent{
+							Type:      orchestrator.EventError,
+							ProjectID: clientMsg.ProjectID,
+							Payload:   err.Error(),
+						})
+						conn.WriteMessage(websocket.TextMessage, b)
+					} else {
+						log.Printf("TEAM RUN FINISHED for %s with %d agents", clientMsg.ProjectID, len(selected.Agents))
+					}
+					return
 				}
 
 				models := make(map[domain.AgentRole]string)
@@ -151,9 +296,8 @@ func (s *WSServer) HandleWS(w http.ResponseWriter, r *http.Request) {
 					models[domain.AgentRole(k)] = v
 				}
 
-				mode := domain.ExecutionMode(payload.Mode)
 				_, err := s.orch.RunWithOptions(ctx, clientMsg.ProjectID, clientMsg.UserPrompt, mode, models, payload.APIKeys)
-				log.Printf("SWARM FINISHED for %s, err=%v", clientMsg.ProjectID, err)
+				log.Printf("SWARM (legacy five-agent roster) FINISHED for %s, err=%v", clientMsg.ProjectID, err)
 				if err != nil {
 					errEvt := orchestrator.SwarmEvent{
 						Type:      orchestrator.EventError,

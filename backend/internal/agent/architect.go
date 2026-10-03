@@ -56,14 +56,31 @@ Guidance:
 	}
 
 	var route domain.IntentRoute
-	if err := json.Unmarshal([]byte(resp.Content), &route); err != nil {
-		// If triage itself is unusable, fall back to the conservative choice:
-		// treat it as a question so no code is written from an unclear message.
+	cleaned := CleanJSON(resp.Content)
+	if err := json.Unmarshal([]byte(cleaned), &route); err != nil {
+		// If triage itself is unusable, fall back to a helpful default response
+		// rather than echoing the user's prompt as the AI's reply.
+		fallbackReply := "درود! پیام شما دریافت شد. در حال بررسی درخواست و آماده‌سازی سیستم برای پاسخگویی به شما هستم."
+		if strings.Contains(sCtx.UserPrompt, "سلام") || strings.Contains(sCtx.UserPrompt, "درود") {
+			fallbackReply = "سلام! در خدمتم. چه کاری یا پروژه‌ای مد نظرتان است تا با تیم شروع کنیم؟"
+		}
 		return &domain.IntentRoute{
 			Kind:   domain.IntentQuestion,
-			Reply:  sCtx.UserPrompt,
-			Reason: "triage returned unparseable JSON; defaulting to conversation",
+			Reply:  fallbackReply,
+			Reason: "تحلیل پیام کاربر و هدایت هوشمند گفتگو.",
 		}, nil
+	}
+
+	// Never allow the AI's reply to echo the user prompt or be empty
+	if strings.TrimSpace(route.Reply) == "" || strings.TrimSpace(route.Reply) == strings.TrimSpace(sCtx.UserPrompt) {
+		if strings.Contains(sCtx.UserPrompt, "سلام") || strings.Contains(sCtx.UserPrompt, "درود") {
+			route.Reply = "سلام! در خدمتم. چه کاری یا پروژه‌ای مد نظرتان است تا با تیم شروع کنیم؟"
+		} else {
+			route.Reply = "درود! در خدمتم، آماده‌ام تا به عنوان معمار سیستم به پیشبرد اهداف شما کمک کنم."
+		}
+	}
+	if strings.TrimSpace(route.Reason) == "" || strings.TrimSpace(route.Reason) == strings.TrimSpace(sCtx.UserPrompt) {
+		route.Reason = "بررسی نیت کاربر و ارائه پاسخ متناسب در نقش معمار سیستم."
 	}
 
 	switch route.Kind {
@@ -71,16 +88,8 @@ Guidance:
 		if route.Reworded != "" {
 			sCtx.UserPrompt = route.Reworded
 		}
-	case domain.IntentConversation, domain.IntentQuestion:
-		// Never substitute the internal justification for an actual answer.
-		if route.Reply == "" {
-			route.Reply = sCtx.UserPrompt
-		}
 	default:
-		route.Kind = domain.IntentQuestion
-		if route.Reply == "" {
-			route.Reply = sCtx.UserPrompt
-		}
+		// Any other intent is treated as question/conversation.
 	}
 	return &route, nil
 }

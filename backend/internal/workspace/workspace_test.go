@@ -73,4 +73,26 @@ func TestWorkspace_SyncAndCommit(t *testing.T) {
 	if synced2[0].Diff == "" {
 		t.Errorf("expected diff to be generated for modified file")
 	}
+
+	// 4. Test RollbackUncommitted (discards uncommitted modifications)
+	brokenFiles := []domain.CodeFile{
+		{
+			Path:     "broken.go",
+			Language: "go",
+			Content:  "package main\n\nfunc broken() {}\n",
+		},
+	}
+	_, err = ws.SyncFiles(brokenFiles)
+	if err != nil {
+		t.Fatalf("sync broken files failed: %v", err)
+	}
+	if err := ws.RollbackUncommitted(context.Background()); err != nil {
+		t.Fatalf("rollback uncommitted failed: %v", err)
+	}
+
+	// 5. Test RollbackToCheckpoint (resets to initial commit)
+	if err := ws.RollbackToCheckpoint(context.Background(), commitHash); err != nil {
+		t.Fatalf("rollback to checkpoint failed: %v", err)
+	}
 }
+

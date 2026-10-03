@@ -1,3 +1,6 @@
+import type { Team } from './types/team';
+export type { Team, AgentSpec, AgentPhase } from './types/team';
+
 export type AgentRole = 'architect' | 'coder' | 'critic' | 'security' | 'arbiter';
 export type ExecutionMode = 'sequential' | 'concurrent' | 'rolebased';
 
@@ -70,14 +73,40 @@ export interface SkillManifest {
   enabled: boolean;
 }
 
+export type TaskState = 'TODO' | 'IN_PROGRESS' | 'DONE' | 'BLOCKED' | 'REWORK' | 'WAITING_FOR_HUMAN';
+
+export interface ProjectTask {
+  id: string;
+  title: string;
+  acceptance?: string;
+  state: TaskState;
+  files?: string[];
+  round?: number;
+}
+
+export interface ProjectPlan {
+  goal: string;
+  tasks: ProjectTask[];
+}
+
 export interface SwarmEvent {
-  type: 'agent_thinking' | 'agent_output' | 'round_started' | 'round_complete' | 'consensus_reached' | 'code_updated' | 'error';
+  type: 'agent_thinking' | 'agent_output' | 'round_started' | 'round_complete' | 'consensus_reached' | 'code_updated' | 'error' | 'teams_data' | 'team_saved' | 'team_deleted' | 'run_started' | 'plan_updated';
   project_id: string;
   round: number;
-  agent?: AgentRole;
+  /** The agent that produced this event. "manager" is the orchestrator itself. */
+  agent?: AgentRole | 'manager';
   message?: AgentMessage;
   verdict?: ArbiterVerdict;
   files?: CodeFile[];
   payload?: any;
+  plan?: ProjectPlan;
   timestamp: string;
+  /** teams_data: every team the user has saved. */
+  teams?: Team[];
+  /** teams_data: which team runs when a project has no explicit choice. */
+  default_team_id?: string;
+  /** team_saved: the team that was just written. */
+  team?: Team;
+  /** team_deleted: the id that was removed. */
+  team_id?: string;
 }

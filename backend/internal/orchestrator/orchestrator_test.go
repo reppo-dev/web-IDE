@@ -36,6 +36,16 @@ func (m *mockLLM) Generate(ctx context.Context, req llm.Request) (*llm.Response,
 		return &llm.Response{
 			Content: `{"project_overview":"Go HTTP API","file_tree":["main.go"],"key_components":["Router"],"api_contracts":["GET /ping"]}`,
 		}, nil
+
+	case strings.Contains(req.SystemPrompt, "Project Planner"):
+		return &llm.Response{
+			Content: `{"goal":"Create a Go Ping API","tasks":[{"id":"T-001","title":"Create main.go","acceptance":"main.go exists and compiles"}]}`,
+		}, nil
+
+	case strings.Contains(req.SystemPrompt, "strict verifier"):
+		return &llm.Response{
+			Content: `{"gaps":[],"summary":"Task T-001 verified against real code."}`,
+		}, nil
 	}
 	return &llm.Response{
 		Content: `{"files":[{"path":"main.go","language":"go","content":"package main\n\nfunc main() {}"}]}`,

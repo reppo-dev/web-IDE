@@ -92,6 +92,9 @@ func TestResolveProvider(t *testing.T) {
 		{"google/gemini-2.5-flash", "openrouter"},
 		{"mimo", "ninerouter"},
 		{"flash_5", "ninerouter"},
+		{"bunny", "ninerouter"},
+		{"nemotron", "ninerouter"},
+		{"nemo_qwen", "ninerouter"},
 		{"ninerouter/anything", "ninerouter"},
 		{"ollama/deepseek-r1:8b", "ollama"},
 	}

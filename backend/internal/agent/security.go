@@ -43,7 +43,7 @@ Your role:
 }`
 
 	codeContent := ""
-	for _, f := range sCtx.CodeFiles {
+	for _, f := range sCtx.CodeFilesSnapshot() {
 		codeContent += fmt.Sprintf("--- File: %s (%s) ---\n%s\n\n", f.Path, f.Language, f.Content)
 	}
 

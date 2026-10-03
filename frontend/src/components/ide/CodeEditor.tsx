@@ -73,9 +73,9 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
             </span>
           )}
           {fileSecIssues.length > 0 && (
-            <span className="flex items-center gap-1 text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-800/40">
+            <span className="flex items-center gap-1 text-amber-400 bg-amber-950/40 px-2 py-0.5 rounded border border-amber-800/40">
               <ShieldAlert size={12} />
-              <span>{fileSecIssues.length} Sec Vulnerability</span>
+              <span>{fileSecIssues.length} امنیتی</span>
             </span>
           )}
           {fileCriticIssues.length === 0 && fileSecIssues.length === 0 && (
@@ -129,8 +129,8 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
             </div>
           ))}
           {fileSecIssues.map((vuln, idx) => (
-            <div key={`sec-${idx}`} className="flex items-start gap-2 text-emerald-300 bg-emerald-950/20 p-2 rounded border border-emerald-900/30">
-              <ShieldAlert size={14} className="shrink-0 mt-0.5 text-emerald-400" />
+            <div key={`sec-${idx}`} className="flex items-start gap-2 text-amber-300 bg-amber-950/20 p-2 rounded border border-amber-900/30">
+              <ShieldAlert size={14} className="shrink-0 mt-0.5 text-amber-400" />
               <div>
                 <span className="font-semibold capitalize">Security Auditor [{vuln.severity}]:</span> {vuln.description}
                 {vuln.suggested_fix && (

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/nexusai/nexusai/backend/internal/domain"
 )
@@ -17,21 +18,13 @@ type Workspace struct {
 	baseDir   string
 	projectID string
 	projPath  string
+	brain     *BrainFS
 	mu        sync.RWMutex
 }
 
 // NewWorkspace creates or attaches to a project directory.
 func NewWorkspace(baseDir, projectID string) (*Workspace, error) {
-	projPath := projectID
-	if !filepath.IsAbs(projPath) {
-		// Check if it exists as relative dir in current working dir
-		if stat, err := os.Stat(projPath); err == nil && stat.IsDir() {
-			abs, _ := filepath.Abs(projPath)
-			projPath = abs
-		} else {
-			projPath = filepath.Join(baseDir, "workspaces", projectID)
-		}
-	}
+	projPath := ProjectPath(baseDir, projectID)
 
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create workspace directory: %w", err)
@@ -41,6 +34,11 @@ func NewWorkspace(baseDir, projectID string) (*Workspace, error) {
 		baseDir:   baseDir,
 		projectID: projectID,
 		projPath:  projPath,
+	}
+
+	// Initialize .project/ Project Brain filesystem (PROJECT_VISION §8)
+	if b, err := NewBrainFS(projPath); err == nil {
+		ws.brain = b
 	}
 
 	// Initialize git repo in workspace if not exists
@@ -63,10 +61,32 @@ func NewWorkspace(baseDir, projectID string) (*Workspace, error) {
 	return ws, nil
 }
 
+// registry is set once at startup so ProjectPath can map a safe project id back
+// to the folder the user actually opened. It is nil in tests that never
+// register a project.
+var registry atomic.Pointer[Registry]
+
+// SetRegistry installs the process-wide project registry.
+func SetRegistry(r *Registry) {
+	registry.Store(r)
+}
+
 // ProjectPath resolves where a project's workspace lives without creating it.
-// Unlike NewWorkspace it performs no mkdir and no git init, so read-only
-// callers such as the agents' context engine must use this instead.
+// A registered project id maps to the folder the user opened; an unknown id
+// falls back to a sandbox folder under the data directory.
 func ProjectPath(baseDir, projectID string) string {
+	if projectID == "" {
+		return filepath.Join(baseDir, "workspaces", "default")
+	}
+
+	// A registered id always wins, so the swarm works on the real project.
+	if r := registry.Load(); r != nil {
+		if root, err := r.RootFor(projectID); err == nil {
+			return root
+		}
+	}
+
+	// A raw path is still accepted so callers can open a folder directly.
 	if filepath.IsAbs(projectID) {
 		return projectID
 	}
@@ -75,7 +95,18 @@ func ProjectPath(baseDir, projectID string) string {
 			return abs
 		}
 	}
-	return filepath.Join(baseDir, "workspaces", projectID)
+
+	// An unknown slug is a generated project: keep it inside the sandbox.
+	return filepath.Join(baseDir, "workspaces", SanitizeID(projectID))
+}
+
+// SanitizeID strips anything that could escape a directory name.
+func SanitizeID(id string) string {
+	cleaned := slugify(id)
+	if cleaned == "" {
+		return "default"
+	}
+	return cleaned
 }
 
 // Path returns the absolute path to this project workspace.
@@ -91,6 +122,7 @@ func (w *Workspace) LoadFiles() ([]domain.CodeFile, error) {
 	var files []domain.CodeFile
 	ignoreDirs := map[string]bool{
 		".git":         true,
+		".project":     true,
 		"node_modules": true,
 		"vendor":       true,
 		".next":        true,
@@ -184,7 +216,12 @@ func (w *Workspace) SaveFile(relPath, content string) error {
 		return err
 	}
 
-	fullPath := filepath.Join(w.projPath, filepath.FromSlash(relPath))
+	// An agent must never write outside the folder the user opened.
+	fullPath, err := SafePath(w.projPath, relPath)
+	if err != nil {
+		return err
+	}
+
 	dir := filepath.Dir(fullPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -202,6 +239,16 @@ func (w *Workspace) SyncFiles(files []domain.CodeFile) ([]domain.CodeFile, error
 	var synced []domain.CodeFile
 
 	for _, file := range files {
+		// Anything outside the project folder is refused before validation:
+		// a model that emits "../../.ssh/id_rsa" must never be written.
+		fullPath, pathErr := SafePath(w.projPath, file.Path)
+		if pathErr != nil {
+			rejected := file
+			rejected.Diff = "REJECTED: " + pathErr.Error()
+			synced = append(synced, rejected)
+			continue
+		}
+
 		if err := ValidateCodeFile(file.Path, file.Content); err != nil {
 			// Keep the file in the list so the UI can show what was rejected,
 			// but never write invalid content to disk.
@@ -211,7 +258,6 @@ func (w *Workspace) SyncFiles(files []domain.CodeFile) ([]domain.CodeFile, error
 			continue
 		}
 
-		fullPath := filepath.Join(w.projPath, filepath.FromSlash(file.Path))
 		dir := filepath.Dir(fullPath)
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return nil, fmt.Errorf("failed to create directory for %s: %w", file.Path, err)
@@ -258,11 +304,78 @@ func (w *Workspace) CommitRound(ctx context.Context, round int, score float64, s
 		return "", fmt.Errorf("git commit failed: %w (output: %s)", err, string(out))
 	}
 
-	// Get latest commit hash
 	revCmd := exec.CommandContext(ctx, "git", "rev-parse", "--short", "HEAD")
 	revCmd.Dir = w.projPath
 	hashBytes, _ := revCmd.Output()
-	return strings.TrimSpace(string(hashBytes)), nil
+	hash := strings.TrimSpace(string(hashBytes))
+
+	// Record in append-only Change Ledger and update state.json (PROJECT_VISION §8)
+	if w.brain != nil {
+		_ = w.brain.AppendLedger(
+			"round_committed",
+			"Orchestrator",
+			fmt.Sprintf("Round %d committed with score %.1f%% (%s)", round, score, summary),
+			hash,
+		)
+		_ = w.brain.UpdateState(func(s *ProjectState) {
+			s.Round = round
+			s.LastCheckpoint = hash
+			if score >= 85.0 {
+				s.TaskStatus = TaskDone
+			} else {
+				s.TaskStatus = TaskRework
+				s.ReworkCount++
+			}
+		})
+	}
+
+	return hash, nil
+}
+
+// Brain returns the project's .project/ BrainFS interface.
+func (w *Workspace) Brain() *BrainFS {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.brain
+}
+
+// RollbackToCheckpoint resets the workspace git state to a specific commit hash.
+func (w *Workspace) RollbackToCheckpoint(ctx context.Context, commitHash string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	cleaned := strings.TrimSpace(commitHash)
+	if cleaned == "" {
+		return fmt.Errorf("empty commit hash for rollback")
+	}
+
+	cmd := exec.CommandContext(ctx, "git", "reset", "--hard", cleaned)
+	cmd.Dir = w.projPath
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git reset --hard failed: %w (output: %s)", err, string(out))
+	}
+	return nil
+}
+
+// RollbackUncommitted discards all unstaged or uncommitted working tree modifications.
+func (w *Workspace) RollbackUncommitted(ctx context.Context) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	cmd := exec.CommandContext(ctx, "git", "checkout", ".")
+	cmd.Dir = w.projPath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git checkout . failed: %w (output: %s)", err, string(out))
+	}
+
+	cleanCmd := exec.CommandContext(ctx, "git", "clean", "-fd")
+	cleanCmd.Dir = w.projPath
+	if out, err := cleanCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git clean -fd failed: %w (output: %s)", err, string(out))
+	}
+
+	return nil
 }
 
 // computeSimpleDiff creates a standard unified diff header representation.

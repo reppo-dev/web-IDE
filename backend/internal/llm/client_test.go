@@ -71,3 +71,60 @@ func TestOpenAICompatClient_Generate(t *testing.T) {
 		t.Errorf("unexpected token count: %+v", resp)
 	}
 }
+
+func TestOpenAICompatClient_NineRouterHybridPayload(t *testing.T) {
+	// NineRouter returns a full JSON body followed by "data: [DONE]"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		payload := `{"id":"gen-123","choices":[{"message":{"role":"assistant","content":"hello world","reasoning":"step 1"}}]}` + "\ndata: [DONE]\n\n"
+		w.Write([]byte(payload))
+	}))
+	defer server.Close()
+
+	client := NewOpenAICompatClient(Config{
+		BaseURL: server.URL,
+		APIKey:  "test-key",
+		Model:   "nemotron",
+	})
+
+	resp, err := client.Generate(context.Background(), Request{UserPrompt: "test"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Content != "hello world" {
+		t.Errorf("expected 'hello world', got %q", resp.Content)
+	}
+	if resp.Reasoning != "step 1" {
+		t.Errorf("expected 'step 1', got %q", resp.Reasoning)
+	}
+}
+
+func TestOpenAICompatClient_SSEStream(t *testing.T) {
+	// Standard SSE chunk stream
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		stream := "data: {\"choices\":[{\"delta\":{\"content\":\"chunk1 \",\"reasoning\":\"r1\"}}]}\n\n" +
+			"data: {\"choices\":[{\"delta\":{\"content\":\"chunk2\"}}]}\n\n" +
+			"data: [DONE]\n\n"
+		w.Write([]byte(stream))
+	}))
+	defer server.Close()
+
+	client := NewOpenAICompatClient(Config{
+		BaseURL: server.URL,
+		APIKey:  "test-key",
+		Model:   "flash_5",
+	})
+
+	resp, err := client.Generate(context.Background(), Request{UserPrompt: "test"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Content != "chunk1 chunk2" {
+		t.Errorf("expected 'chunk1 chunk2', got %q", resp.Content)
+	}
+	if resp.Reasoning != "r1" {
+		t.Errorf("expected 'r1', got %q", resp.Reasoning)
+	}
+}
+

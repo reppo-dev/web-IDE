@@ -17,6 +17,8 @@ import (
 	"github.com/nexusai/nexusai/backend/internal/memory"
 	"github.com/nexusai/nexusai/backend/internal/orchestrator"
 	"github.com/nexusai/nexusai/backend/internal/skills"
+	"github.com/nexusai/nexusai/backend/internal/team"
+	"github.com/nexusai/nexusai/backend/internal/workspace"
 )
 
 func main() {
@@ -39,8 +41,14 @@ func main() {
 		log.Printf("Loaded %d skills from %s", len(skillsMgr.ListSkills()), cfg.SkillsDir)
 	}
 
-	// 3. Initialize LLM Client
-	llmClient := llm.NewOpenAICompatClient(cfg.LLM)
+	// 3. Initialize LLM Client, wrapped in the shared resilience Guard:
+	// concurrency limit toward the provider, retry with backoff on transient
+	// errors (429/5xx/network), and session token budget (PROJECT_VISION §13, §26).
+	llmClient := llm.NewGuard(llm.NewOpenAICompatClient(cfg.LLM), llm.GuardOptions{
+		MaxConcurrent: cfg.LLMMaxConcurrent,
+		MaxAttempts:   cfg.LLMMaxAttempts,
+		Budget:        llm.NewBudget(cfg.MaxTotalTokens),
+	})
 
 	// 4. Initialize 5 Specialized Agents
 	arch := agent.NewArchitectAgent(llmClient)
@@ -58,15 +66,34 @@ func main() {
 		},
 		arch, coder, critic, sec, arb, memStore, matrix, cfg.DataDir,
 	)
+	orch.SetLLMClient(llmClient)
 
-	// 6. Initialize WebSocket Streaming Hub
-	wsHub := api.NewWSServer(orch, memStore, skillsMgr)
+	// 6. Initialize Custom Team Store
+	teamStore, err := team.NewSQLiteStore(cfg.DataDir)
+	if err != nil {
+		log.Fatalf("failed to init team store: %v", err)
+	}
+	defer teamStore.Close()
+	_ = teamStore.SeedDevelopersTeam()
+	log.Printf("Custom Team Store initialized at %s", cfg.DataDir)
+
+	// 7. Load the registry of folders the user has opened, so a project id
+	// always maps back to the real directory on disk.
+	projectReg, err := workspace.NewRegistry(cfg.DataDir)
+	if err != nil {
+		log.Fatalf("failed to init project registry: %v", err)
+	}
+	workspace.SetRegistry(projectReg)
+	log.Printf("Project registry loaded (%d folders)", len(projectReg.List()))
+
+	// 8. Initialize WebSocket Streaming Hub
+	wsHub := api.NewWSServer(orch, memStore, skillsMgr, teamStore)
 	hubCtx, cancelHub := context.WithCancel(context.Background())
 	defer cancelHub()
 	go wsHub.Start(hubCtx)
 
-	// 7. Initialize HTTP Server
-	router := api.NewRouter(wsHub, memStore, skillsMgr)
+	// 9. Initialize HTTP Server
+	router := api.NewRouter(wsHub, memStore, skillsMgr, teamStore, projectReg)
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%s", cfg.Port),
 		Handler: router,

@@ -17,6 +17,7 @@ import {
   Search 
 } from 'lucide-react';
 import { SidebarView } from './ActivityBar';
+import { ProjectTree } from '../ide/ProjectTree';
 import { CodeFile, MemoryEntry, SkillManifest, ArbiterVerdict } from '../../types';
 
 interface SidebarProps {
@@ -102,45 +103,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             ) : files.length === 0 ? (
               <div className="p-4 text-center text-zinc-500 text-xs">
-                No files created yet.<br />Use Cursor Composer (right panel) to let the swarm generate files.
+                این پوشه هنوز فایل قابل نمایشی ندارد.
               </div>
             ) : (
-              <div className="space-y-0.5">
-                <div className="flex items-center gap-1 px-2 py-1 text-zinc-400 font-semibold text-[11px]">
-                  <ChevronDown size={13} />
-                  <span>SRC</span>
-                </div>
-                {files.map((file) => {
-                  const isActive = activeFile === file.path;
-                  return (
-                    <div
-                      key={file.path}
-                      onClick={() => onSelectFile(file.path)}
-                      className={`flex items-center justify-between group px-2 py-1.5 rounded cursor-pointer transition-colors ${
-                        isActive
-                          ? 'bg-zinc-800 text-zinc-100 font-medium border-l-2 border-indigo-500'
-                          : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5 truncate">
-                        <FileCode size={13} className={isActive ? 'text-indigo-400' : 'text-zinc-500'} />
-                        <span className="truncate">{file.path}</span>
-                      </div>
-                      {onDeleteFile && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDeleteFile(file.path);
-                          }}
-                          className="opacity-0 group-hover:opacity-100 p-0.5 text-zinc-500 hover:text-red-400 transition-opacity"
-                        >
-                          <Trash2 size={11} />
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+              <ProjectTree
+                files={files}
+                activeFile={activeFile}
+                rootName={projectName}
+                onSelectFile={onSelectFile}
+                onDeleteFile={onDeleteFile}
+              />
             )}
           </div>
         )}

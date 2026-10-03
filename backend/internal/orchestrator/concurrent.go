@@ -17,7 +17,39 @@ func (o *Orchestrator) runConcurrent(ctx context.Context, projectID string, user
 		UserPrompt:  userPrompt,
 		MemStore:    o.memStore,
 		AgentModels: agentModels,
-		APIKeys: apiKeys,
+		APIKeys:     apiKeys,
+	}
+
+	ws, err := workspace.NewWorkspace(o.baseDir, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("concurrent: failed to open project workspace: %w", err)
+	}
+	sCtx.WorkspacePath = ws.Path()
+
+	if len(sCtx.CodeFilesSnapshot()) == 0 {
+		if existing, err := ws.LoadFiles(); err == nil && len(existing) > 0 {
+			sCtx.SetCodeFiles(existing)
+		}
+	}
+
+	// Concurrent mode shares the plan-driven loop instead of keeping its own
+	// bounded one. That loop used to stop at MaxRounds in every mode, so the
+	// same project would stall here while finishing elsewhere. Reviewing the
+	// critic and the security auditor together is the only thing that
+	// distinguishes this mode now.
+	return o.runPlanDrivenLoop(ctx, sCtx, projectID, ws)
+}
+
+// runConcurrentLegacy is the previous bounded concurrent loop, kept out of the
+// dispatch path until the plan-driven loop has proven stable in this mode too.
+func (o *Orchestrator) runConcurrentLegacy(ctx context.Context, projectID string, userPrompt string, agentModels map[domain.AgentRole]string, apiKeys map[string]string) (*agent.SwarmContext, error) {
+	sCtx := &agent.SwarmContext{
+		ProjectID:   projectID,
+		Round:       1,
+		UserPrompt:  userPrompt,
+		MemStore:    o.memStore,
+		AgentModels: agentModels,
+		APIKeys:     apiKeys,
 	}
 
 	// Let agents read the real project before they write anything. This uses the

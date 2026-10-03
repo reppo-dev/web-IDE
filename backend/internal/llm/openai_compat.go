@@ -39,6 +39,7 @@ func NewOpenAICompatClient(cfg Config) *OpenAICompatClient {
 type chatMessage struct {
 	Role             string `json:"role"`
 	Content          string `json:"content"`
+	Reasoning        string `json:"reasoning,omitempty"`
 	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
@@ -157,7 +158,16 @@ func (c *OpenAICompatClient) Generate(ctx context.Context, req Request) (*Respon
 	var chatResp chatCompletionResponse
 	trimmedBody := bytes.TrimSpace(respBody)
 
-	if bytes.HasPrefix(trimmedBody, []byte("data:")) || strings.Contains(string(trimmedBody), "\ndata:") {
+	// Clean trailing "data: [DONE]" if present after full JSON payload (NineRouter behaviour)
+	cleanBody := trimmedBody
+	if idx := bytes.Index(cleanBody, []byte("data: [DONE]")); idx != -1 {
+		cleanBody = bytes.TrimSpace(cleanBody[:idx])
+	}
+
+	// Try standard JSON unmarshal first
+	if err := json.Unmarshal(cleanBody, &chatResp); err == nil && len(chatResp.Choices) > 0 {
+		// Parsed as complete JSON response successfully
+	} else if bytes.HasPrefix(trimmedBody, []byte("data:")) || strings.Contains(string(trimmedBody), "\ndata:") {
 		// Server-Sent Events stream: accumulate tokens from chunks
 		var sb strings.Builder
 		var reasonSb strings.Builder
@@ -175,13 +185,18 @@ func (c *OpenAICompatClient) Generate(ctx context.Context, req Request) (*Respon
 				Choices []struct {
 					Delta struct {
 						Content          string `json:"content"`
+						Reasoning        string `json:"reasoning"`
 						ReasoningContent string `json:"reasoning_content"`
 					} `json:"delta"`
 				} `json:"choices"`
 			}
 			if err := json.Unmarshal([]byte(payload), &chunk); err == nil && len(chunk.Choices) > 0 {
 				sb.WriteString(chunk.Choices[0].Delta.Content)
-				reasonSb.WriteString(chunk.Choices[0].Delta.ReasoningContent)
+				r := chunk.Choices[0].Delta.ReasoningContent
+				if r == "" {
+					r = chunk.Choices[0].Delta.Reasoning
+				}
+				reasonSb.WriteString(r)
 			}
 		}
 		chatResp.Choices = []chatCompletionChoice{
@@ -209,6 +224,9 @@ func (c *OpenAICompatClient) Generate(ctx context.Context, req Request) (*Respon
 
 	rawContent := chatResp.Choices[0].Message.Content
 	reasoning := chatResp.Choices[0].Message.ReasoningContent
+	if reasoning == "" {
+		reasoning = chatResp.Choices[0].Message.Reasoning
+	}
 
 	if strings.Contains(rawContent, "<think>") && strings.Contains(rawContent, "</think>") {
 		sIdx := strings.Index(rawContent, "<think>") + len("<think>")
@@ -219,6 +237,10 @@ func (c *OpenAICompatClient) Generate(ctx context.Context, req Request) (*Respon
 			}
 			rawContent = strings.TrimSpace(rawContent[:sIdx-len("<think>")] + rawContent[eIdx+len("</think>"):])
 		}
+	}
+
+	if rawContent == "" && reasoning != "" {
+		rawContent = reasoning
 	}
 
 	return &Response{

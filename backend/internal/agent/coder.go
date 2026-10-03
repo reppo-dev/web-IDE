@@ -59,6 +59,12 @@ Your role:
 		if structure, err := engine.BuildStructure(); err == nil && structure != "" {
 			projectCode += "\n--- PROJECT STRUCTURE ---\n" + structure
 		}
+		// State the boundary so the model does not waste a turn proposing a
+		// path the workspace would reject anyway.
+		projectCode += fmt.Sprintf(
+			"\n--- SCOPE ---\nYou may only touch files inside %s\n"+
+				"Every \"path\" must be relative to that folder. No absolute paths, no .. references.\n",
+			sCtx.WorkspacePath)
 	}
 
 	userPrompt := fmt.Sprintf("Goal: %s\n%s", sCtx.UserPrompt, memories)
@@ -131,7 +137,7 @@ Your role:
 		return nil, fmt.Errorf("coder returned no files")
 	}
 
-	sCtx.CodeFiles = parsed.Files
+	sCtx.MergeCodeFiles(parsed.Files)
 
 	summary := strings.TrimSpace(parsed.Explanation)
 	if summary == "" {

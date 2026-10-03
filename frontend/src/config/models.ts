@@ -94,6 +94,20 @@ export const AVAILABLE_MODELS: ModelOption[] = [
     isFree: true,
   },
   {
+    id: 'nemotron',
+    name: 'NineRouter: Nemotron (Nvidia Super)',
+    provider: 'ninerouter',
+    description: 'Nvidia Nemotron model via local 9Router gateway',
+    isFree: true,
+  },
+  {
+    id: 'nemo_qwen',
+    name: 'NineRouter: Nemo Qwen (Nvidia Ultra)',
+    provider: 'ninerouter',
+    description: 'Nvidia Nemo Qwen high-reasoning model via local 9Router gateway',
+    isFree: true,
+  },
+  {
     id: 'ollama/deepseek-r1:8b',
     name: 'Ollama: DeepSeek-R1 (Local)',
     provider: 'ollama',
@@ -116,6 +130,19 @@ export interface SwarmPreset {
 }
 
 export const SWARM_PRESETS: SwarmPreset[] = [
+  {
+    id: 'ninerouter-developers',
+    name: '🚀 NineRouter Developers Team (تیم دولوپر ها)',
+    nameFa: 'تیم دولوپر ها (ناین‌روتر ۵ نفره)',
+    description: 'تیم ۵ نفره متشکل از Nemo Qwen، Nemotron، Bunny، Flash 5 و MiMo بر بستر ناین‌روتر.',
+    models: {
+      architect: 'nemo_qwen',
+      coder: 'mimo',
+      critic: 'bunny',
+      security: 'nemotron',
+      arbiter: 'flash_5',
+    },
+  },
   {
     id: 'ninerouter-combo',
     name: '🔥 NineRouter 3-Model Combo (Flash 5 + MiMo + Bunny)',

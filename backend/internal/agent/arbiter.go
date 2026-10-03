@@ -40,14 +40,36 @@ func (arb *ArbiterAgent) Execute(ctx context.Context, sCtx *SwarmContext) (*doma
 		fixedBugs = sCtx.Round * 2
 	}
 
+	// The plan is what proves the project is finished, so the arbiter reads it
+	// directly instead of inferring completion from how clean the code looks.
+	planPercent, openTasks, hasPlan := sCtx.PlanProgress()
+	plan := sCtx.PlanSnapshot()
+	totalTasks := 0
+	if plan != nil {
+		totalTasks = len(plan.Tasks)
+	}
+
+	taskPassed := false
+	var taskGaps []string
+	if v := sCtx.LastTaskVerdict; v != nil {
+		taskPassed = v.Passed
+		taskGaps = v.Gaps
+	}
+
 	evalInput := scoring.EvaluationInput{
 		Round:              sCtx.Round,
 		CriticIssues:       criticIssues,
 		SecurityVulns:      secVulns,
-		CodeFilesCount:     len(sCtx.CodeFiles),
+		CodeFilesCount:     len(sCtx.CodeFilesSnapshot()),
 		UnresolvedBugs:     len(criticIssues),
 		FixedBugsCount:     fixedBugs,
 		AdheresToBlueprint: sCtx.Blueprint != nil,
+		PlanPercent:        planPercent,
+		OpenTasks:          openTasks,
+		HasPlan:            hasPlan,
+		TaskPassed:         taskPassed,
+		TaskGaps:           taskGaps,
+		TotalTasks:         totalTasks,
 	}
 
 	verdict := arb.scorer.Evaluate(evalInput)

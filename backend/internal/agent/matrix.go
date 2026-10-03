@@ -134,7 +134,7 @@ Evaluate their work strictly from your professional perspective:
 }`, rev, tgt)
 
 	filesSummary := ""
-	for _, f := range sCtx.CodeFiles {
+	for _, f := range sCtx.CodeFilesSnapshot() {
 		filesSummary += fmt.Sprintf("- %s (%s)\n", f.Path, f.Language)
 	}
 	if filesSummary == "" {

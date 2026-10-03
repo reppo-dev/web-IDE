@@ -3,6 +3,7 @@ package config
 import (
 	"bufio"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/nexusai/nexusai/backend/internal/domain"
@@ -17,6 +18,14 @@ type AppConfig struct {
 	Mode      domain.ExecutionMode `json:"mode"`
 	MaxRounds int                  `json:"max_rounds"`
 	LLM       llm.Config           `json:"llm"`
+
+	// Resilience knobs for the shared LLM Guard (llm.Guard):
+	// LLMMaxConcurrent caps in-flight requests toward the provider;
+	// LLMMaxAttempts is the total tries per request on transient errors;
+	// MaxTotalTokens is the session token budget (0 = unlimited).
+	LLMMaxConcurrent int `json:"llm_max_concurrent"`
+	LLMMaxAttempts   int `json:"llm_max_attempts"`
+	MaxTotalTokens   int `json:"max_total_tokens"`
 }
 
 func loadDotEnv() {
@@ -46,6 +55,19 @@ func loadDotEnv() {
 		}
 		break
 	}
+}
+
+// envInt reads an integer environment variable with a default fallback.
+func envInt(key string, def int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 0 {
+		return def
+	}
+	return v
 }
 
 // LoadConfig loads configuration with sensible defaults and environment variable overrides.
@@ -101,5 +123,18 @@ func LoadConfig() AppConfig {
 			Model:       model,
 			Temperature: 0.2,
 		},
+
+		// LLM resilience guard (PROJECT_VISION §13 fallback, §26 limits).
+		LLMMaxConcurrent: maxInt(1, envInt("NEXUS_LLM_MAX_CONCURRENT", 2)),
+		LLMMaxAttempts:   maxInt(1, envInt("NEXUS_LLM_MAX_ATTEMPTS", 3)),
+		MaxTotalTokens:   envInt("NEXUS_MAX_TOTAL_TOKENS", 0),
 	}
+}
+
+// maxInt returns the larger of two ints.
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

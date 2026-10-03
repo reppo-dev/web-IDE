@@ -44,7 +44,7 @@ Your role:
 }`
 
 	codeContent := ""
-	for _, f := range sCtx.CodeFiles {
+	for _, f := range sCtx.CodeFilesSnapshot() {
 		codeContent += fmt.Sprintf("--- File: %s (%s) ---\n%s\n\n", f.Path, f.Language, f.Content)
 	}
 
@@ -103,7 +103,15 @@ Your role:
 		}
 	}
 
-	sCtx.CriticReview = &payload
+	// The critic's own findings are merged with any issues the pipeline already
+	// recorded rather than replacing them. Assignment here used to discard the
+	// compiler's errors, which let a project that did not compile be scored on
+	// the critic's opinion alone.
+	if sCtx.CriticReview == nil {
+		sCtx.CriticReview = &domain.CriticPayload{}
+	}
+	sCtx.CriticReview.GeneralReview = payload.GeneralReview
+	sCtx.CriticReview.Issues = append(sCtx.CriticReview.Issues, payload.Issues...)
 
 	// Record any discovered mistakes into project memory
 	if sCtx.MemStore != nil && len(payload.Issues) > 0 {

@@ -19,10 +19,15 @@ import {
   Copy,
   CheckCheck,
   WifiOff,
-  AlertTriangle
+  AlertTriangle,
+  Settings2,
+  ListTodo,
+  Clock,
+  AlertCircle
 } from 'lucide-react';
-import { AgentMessage, ArbiterVerdict, ExecutionMode, AgentRole } from '../../types';
+import { AgentMessage, ArbiterVerdict, ExecutionMode, AgentRole, ProjectPlan } from '../../types';
 import { AVAILABLE_MODELS, SWARM_PRESETS, SwarmPreset } from '../../config/models';
+import { Team } from '../../types/team';
 
 interface ComposerPanelProps {
   messages: AgentMessage[];
@@ -40,6 +45,14 @@ interface ComposerPanelProps {
   stalled?: boolean;
   /** False when the daemon WebSocket is not connected. */
   connected?: boolean;
+  /** User-built teams available for this project. */
+  teams?: Team[];
+  /** Which team runs when the user sends a prompt. */
+  selectedTeamId?: string;
+  onSelectTeam?: (teamId: string) => void;
+  onOpenTeamBuilder?: () => void;
+  /** Active project plan and tasks. */
+  plan?: ProjectPlan | null;
 }
 
 // Helper to render simple markdown cleanly without heavy external libs
@@ -152,9 +165,15 @@ export const ComposerPanel: React.FC<ComposerPanelProps> = ({
   thinkingAgent,
   stalled,
   connected,
+  teams,
+  selectedTeamId,
+  onSelectTeam,
+  onOpenTeamBuilder,
+  plan,
 }) => {
   const [prompt, setPrompt] = useState('');
   const [showRoster, setShowRoster] = useState(false);
+  const [showPlanBoard, setShowPlanBoard] = useState(true);
   const [customModelInputs, setCustomModelInputs] = useState<Record<string, string>>({});
   // Track open/collapsed deliberation accordions by turn ID
   const [collapsedTurns, setCollapsedTurns] = useState<Record<string, boolean>>({});
@@ -354,6 +373,37 @@ export const ComposerPanel: React.FC<ComposerPanelProps> = ({
             </span>
           </div>
         )}
+        {/* Team picker: the user chooses which saved team runs this project. */}
+        {onSelectTeam && (
+          <div className="flex items-center gap-1.5">
+            <select
+              value={selectedTeamId || 'default'}
+              onChange={(e) => onSelectTeam(e.target.value)}
+              className="flex-1 bg-[#1e1e1e] text-zinc-200 text-[11px] px-2 py-1.5 rounded border border-[#2a2a2a] outline-none cursor-pointer"
+            >
+              <option value="default">
+                تیم پیش‌فرض ۵ نفره
+              </option>
+              {(teams || [])
+                .filter((t) => t.id !== 'default')
+                .map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} ({t.agents.length} ایجنت)
+                  </option>
+                ))}
+            </select>
+            {onOpenTeamBuilder && (
+              <button
+                onClick={onOpenTeamBuilder}
+                className="p-1.5 bg-[#1e1e1e] hover:bg-[#252525] text-zinc-400 hover:text-zinc-200 rounded border border-[#2a2a2a]"
+                title="ساخت تیم دلخواه"
+              >
+                <Settings2 size={13} />
+              </button>
+            )}
+          </div>
+        )}
+
         <button
           onClick={() => setShowRoster(!showRoster)}
           className="w-full flex items-center justify-between bg-[#1e1e1e] hover:bg-[#252525] px-2.5 py-1.5 rounded border border-[#2a2a2a] transition-colors text-left"
@@ -481,6 +531,84 @@ export const ComposerPanel: React.FC<ComposerPanelProps> = ({
         </div>
       )}
 
+      {/* Project Plan Task Tracker Board */}
+      {plan && plan.tasks && plan.tasks.length > 0 && (() => {
+        const planTasks = plan.tasks;
+        const doneTasks = planTasks.filter((t) => t.state === 'DONE').length;
+        const planPercent = Math.round((doneTasks / planTasks.length) * 100);
+
+        return (
+          <div className="border-b border-[#222222] bg-[#141414]/90 px-3 py-2 space-y-1.5 transition-all">
+            <div className="flex items-center justify-between text-[11px]">
+              <button 
+                type="button" 
+                onClick={() => setShowPlanBoard(!showPlanBoard)}
+                className="flex items-center gap-1.5 font-semibold text-zinc-200 hover:text-white transition-colors"
+              >
+                <ListTodo size={13} className="text-indigo-400" />
+                <span>برنامه و تسک‌های پروژه</span>
+                <span className="text-[10px] text-zinc-400 font-normal">
+                  ({doneTasks}/{planTasks.length} انجام شده — {planPercent}٪)
+                </span>
+                {showPlanBoard ? <ChevronUp size={12} className="text-zinc-500" /> : <ChevronDown size={12} className="text-zinc-500" />}
+              </button>
+              <div className="w-20 bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                <div 
+                  className="bg-indigo-500 h-full rounded-full transition-all duration-300"
+                  style={{ width: `${planPercent}%` }}
+                />
+              </div>
+            </div>
+
+            {showPlanBoard && (
+              <div className="space-y-1 pt-1 max-h-40 overflow-y-auto pr-1">
+                {plan.tasks.map((task) => {
+                  let badgeColor = 'bg-zinc-800/70 text-zinc-400 border-zinc-700/60';
+                  let stateLabel = 'در انتظار';
+                  let stateIcon = <Clock size={11} className="text-zinc-500" />;
+
+                  if (task.state === 'DONE') {
+                    badgeColor = 'bg-emerald-950/60 text-emerald-400 border-emerald-800/40';
+                    stateLabel = 'تکمیل شد';
+                    stateIcon = <CheckCircle2 size={11} className="text-emerald-400" />;
+                  } else if (task.state === 'IN_PROGRESS') {
+                    badgeColor = 'bg-indigo-950/60 text-indigo-300 border-indigo-700/50 animate-pulse';
+                    stateLabel = 'در حال انجام';
+                    stateIcon = <RotateCcw size={11} className="text-indigo-400 animate-spin" />;
+                  } else if (task.state === 'REWORK') {
+                    badgeColor = 'bg-amber-950/60 text-amber-300 border-amber-700/50';
+                    stateLabel = 'بازبینی / اصلاح';
+                    stateIcon = <RotateCcw size={11} className="text-amber-400" />;
+                  } else if (task.state === 'BLOCKED') {
+                    badgeColor = 'bg-rose-950/60 text-rose-300 border-rose-800/50';
+                    stateLabel = 'مسدود';
+                    stateIcon = <AlertTriangle size={11} className="text-rose-400" />;
+                  } else if (task.state === 'WAITING_FOR_HUMAN') {
+                    badgeColor = 'bg-purple-950/60 text-purple-300 border-purple-800/50';
+                    stateLabel = 'نیاز به کاربر';
+                    stateIcon = <AlertCircle size={11} className="text-purple-400" />;
+                  }
+
+                  return (
+                    <div key={task.id} className="flex items-center justify-between p-1.5 rounded bg-[#1a1a1a] border border-[#262626] text-[10px]">
+                      <div className="flex items-center gap-1.5 truncate">
+                        {stateIcon}
+                        <span className="font-mono text-zinc-400 shrink-0">{task.id}</span>
+                        <span className="text-zinc-200 truncate">{task.title}</span>
+                      </div>
+                      <span className={`px-1.5 py-0.5 rounded border text-[9px] font-medium shrink-0 flex items-center gap-1 ${badgeColor}`}>
+                        {stateLabel}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+
       {/* Messages stream */}
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
         {messages.length === 0 ? (
@@ -601,6 +729,17 @@ export const ComposerPanel: React.FC<ComposerPanelProps> = ({
                           } else if (typeof m.content === 'string' && m.content) {
                             if (!replyText || replyText.startsWith('[')) {
                               replyText = m.content;
+                            }
+                          }
+
+                          // Guard: Ensure user prompt never leaks as the AI's internal thought or reply
+                          const userContent = turn.userMessage?.content?.trim() || '';
+                          if (userContent) {
+                            if (thoughtText.trim() === userContent) {
+                              thoughtText = '';
+                            }
+                            if (replyText.trim() === userContent) {
+                              replyText = 'درود! پیام شما دریافت شد و بررسی درخواست در حال انجام است.';
                             }
                           }
 

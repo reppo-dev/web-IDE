@@ -1,6 +1,9 @@
 package scoring
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/nexusai/nexusai/backend/internal/domain"
 )
 
@@ -28,6 +31,42 @@ type EvaluationInput struct {
 	FixedBugsCount     int
 	AdheresToBlueprint bool
 	CustomQualityScore float64 // Optional direct rating 0-100
+
+	// PlanPercent is how much of the project plan is finished, 0-100. The
+	// arbiter must not declare the project done while open work remains,
+	// however clean the current code happens to be.
+	PlanPercent float64
+	// OpenTasks is the number of tasks still standing. Zero with a non-empty
+	// plan means the project is finished.
+	OpenTasks int
+	// HasPlan distinguishes "no plan was made" from "the plan is complete".
+	// Without a plan the arbiter can only judge this round, never the project.
+	HasPlan bool
+	// TaskPassed reports whether the task this round worked on survived
+	// verification against the real code. A round can be clean code and still
+	// have failed its task, so this is scored separately from code quality.
+	TaskPassed bool
+	// TaskGaps are the reasons the active task is not finished. Any gap means
+	// the task goes back to rework.
+	TaskGaps []string
+	// TotalTasks is the size of the plan, so progress can be reported as
+	// "3 of 11" rather than as a percentage the reader cannot place.
+	TotalTasks int
+}
+
+// IsProjectComplete reports whether the evidence says the whole project is
+// finished.
+//
+// This is deliberately not just "score >= threshold". The failure this replaces
+// was a run that scored 87% on a clean single file and stopped, with almost none
+// of the project built. Code quality is necessary but never sufficient: work is
+// only complete when the plan says so, and the plan can only say so when a
+// verification gate closed each task against the real code.
+func (i EvaluationInput) IsProjectComplete() bool {
+	if !i.HasPlan {
+		return true
+	}
+	return i.OpenTasks == 0 && i.TaskPassed
 }
 
 // Evaluate produces the weighted ArbiterVerdict.
@@ -104,14 +143,46 @@ func (s *Scorer) Evaluate(input EvaluationInput) domain.ArbiterVerdict {
 		finalScore += d.Score * d.Weight
 	}
 
-	passed := finalScore >= s.Threshold
-	needsRefinement := !passed
+	// The round is "good" on its own terms when the code is clean, and that is a
+	// real signal worth keeping: it is what drives the run forward. It is not,
+	// however, a claim that the project is finished.
+	roundClean := finalScore >= s.Threshold
+
+	// Completion is decided by the plan, never by the score. This is the fix for
+	// the original bug: a high score on an incomplete project used to end the
+	// run, and a low score on a complete project used to keep it going forever.
+	projectComplete := input.IsProjectComplete()
+	passed := roundClean && projectComplete
+	needsRefinement := !roundClean
 
 	summary := "Code approved by Arbiter. Consensus reached."
 	feedback := "Proceeding to merge code into production workspace."
-	if needsRefinement {
+
+	switch {
+	case !roundClean:
 		summary = "Consensus not reached. Refinement required."
 		feedback = "Please address the critical issues flagged by the Critic and Security Auditor."
+	case !input.HasPlan:
+		// A clean round with no plan proves nothing about the project, so the
+		// run continues: without a work list there is no way to know what
+		// remains, and stopping here is exactly the bug this gate exists for.
+		summary = "Code is clean, but no project plan exists, so completion cannot be proven."
+		feedback = "Build a task plan first. A clean round alone never proves the project is finished."
+	case !input.TaskPassed:
+		// Checked before the open-task count so a failed task is reported as
+		// rework on the task it failed, rather than being hidden behind a
+		// message about tasks that are merely still to do.
+		summary = fmt.Sprintf("Task failed verification in round %d. Returning it to rework.", input.Round)
+		feedback = "The task did not meet its acceptance condition: " +
+			strings.Join(input.TaskGaps, "; ")
+	case input.OpenTasks > 0:
+		summary = fmt.Sprintf(
+			"Round %d is clean (%.1f%%), but %d of %d tasks remain open (%.0f%% complete). Continuing with the next task.",
+			input.Round, finalScore, input.OpenTasks, input.TotalTasks, input.PlanPercent)
+		feedback = "Move to the next open task. The project is not finished yet."
+	default:
+		summary = fmt.Sprintf("Project complete: every task verified against the real code (%.0f%% complete, score %.1f%%).",
+			input.PlanPercent, finalScore)
 	}
 
 	return domain.ArbiterVerdict{
