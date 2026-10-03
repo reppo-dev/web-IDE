@@ -44,8 +44,6 @@ type progressWatcher struct {
 	stuckRounds int
 
 	history []progressSnapshot
-	// lastProgressRound is the most recent round that actually changed something.
-	lastProgressRound int
 	// lastCompleted mirrors the highest task count reached, used to detect a
 	// round that churns without ever closing a task.
 	lastCompleted int
@@ -64,6 +62,13 @@ func (w *progressWatcher) record(sCtx *agent.SwarmContext) bool {
 	snap := snapshotOf(sCtx)
 	w.history = append(w.history, snap)
 
+	// Seed the high-water mark on the first round. Without this, a run that
+	// closes its first task immediately would look like it advanced from zero on
+	// every later round, and a genuinely stuck project would never be detected.
+	if w.lastCompleted < snap.completed {
+		w.lastCompleted = snap.completed
+	}
+
 	if len(w.history) < 2 {
 		return false
 	}
@@ -74,10 +79,6 @@ func (w *progressWatcher) record(sCtx *agent.SwarmContext) bool {
 	// task moved to done. Only the exact absence of all three means no work.
 	changed := snap.fingerprint != prev.fingerprint
 	advanced := snap.completed > w.lastCompleted
-	if advanced {
-		w.lastCompleted = snap.completed
-		w.lastProgressRound = len(w.history)
-	}
 
 	if changed || advanced {
 		return false

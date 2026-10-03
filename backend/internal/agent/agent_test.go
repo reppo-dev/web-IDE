@@ -65,6 +65,11 @@ func TestGetAPIKeyRequiresExplicitModel(t *testing.T) {
 		t.Error("expected error for unknown model, got nil")
 	}
 
+	// getAPIKey falls back to the environment when a provider key is absent, so
+	// on a machine that has the project's .env loaded this lookup would silently
+	// succeed and the missing-key path would stop being tested at all.
+	t.Setenv("OPENROUTER_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
 	sCtx.APIKeys = map[string]string{}
 	if _, _, err := a.getAPIKey("openrouter/free", sCtx); err == nil {
 		t.Error("expected error for missing key, got nil")

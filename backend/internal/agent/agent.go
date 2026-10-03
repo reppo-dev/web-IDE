@@ -453,6 +453,16 @@ func (b *BaseAgent) getModelForRole(sCtx *SwarmContext) string {
 }
 
 func (b *BaseAgent) cleanModelName(model string) string {
+	return cleanModelName(model)
+}
+
+// cleanModelName strips the provider namespace from a model id.
+//
+// The prefix tells ResolveProvider where to send the request; the endpoint then
+// expects the bare model name. Sending "ninerouter/gpt-4" to the ninerouter
+// endpoint gets rejected as an unknown model, so the name must be cleaned at the
+// point of sending while the provider is resolved from the original.
+func cleanModelName(model string) string {
 	if len(model) >= 11 && model[:11] == "ninerouter/" {
 		return model[11:]
 	}

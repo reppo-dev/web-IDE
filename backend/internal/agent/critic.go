@@ -111,6 +111,7 @@ Your role:
 		sCtx.CriticReview = &domain.CriticPayload{}
 	}
 	sCtx.CriticReview.GeneralReview = payload.GeneralReview
+	sCtx.CriticReview.RefactorPlan = payload.RefactorPlan
 	sCtx.CriticReview.Issues = append(sCtx.CriticReview.Issues, payload.Issues...)
 
 	// Record any discovered mistakes into project memory

@@ -316,7 +316,11 @@ func (v *TaskVerifier) resolveModel(sCtx *SwarmContext) (model, apiKey, baseURL 
 		return "", "", "", fmt.Errorf("no API key found for provider %q, so verification cannot run", route.apiKeyName)
 	}
 
-	return chosen, key, route.baseURL, nil
+	// The provider is resolved from the namespaced name, but the endpoint is
+	// sent the bare model id. Sending the prefix through makes the provider
+	// reject it as an unknown model, which the loop then treats as a fatal
+	// verification failure and ends the run.
+	return cleanModelName(chosen), key, route.baseURL, nil
 }
 
 func testNote(checked []string) string {

@@ -207,6 +207,10 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 			Payload:   fmt.Sprintf("Task %s: %s", task.ID, task.Title),
 		})
 
+		// 2. Implement the task. The file set is snapshotted first so this
+		// round's real output can be told apart from everything built earlier.
+		filesBefore := sCtx.CodeFilesSnapshot()
+
 		// 2. Implement the task.
 		o.broadcast(SwarmEvent{
 			Type:      EventAgentThinking,
@@ -253,7 +257,8 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 
 		// 3. Record what the coder produced, so the gate below knows which files
 		// this task was supposed to deliver and can check they really exist.
-		sCtx.SetActiveTaskFiles(filesTouchedThisRound(sCtx, sCtx.CodeFilesSnapshot()))
+		touched := filesTouchedThisRound(sCtx, filesBefore, sCtx.CodeFilesSnapshot())
+		sCtx.SetActiveTaskFiles(touched)
 
 		// 4. Review. Compilation failures are injected as real issues so a
 		// broken build cannot be talked past.
@@ -272,7 +277,7 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 
 		if verdict != nil {
 			if verdict.Passed {
-				sCtx.CompleteTask(task.Files)
+				sCtx.CompleteTask(touched)
 			} else {
 				sCtx.SendTaskBackToRework()
 			}
@@ -389,24 +394,32 @@ func (o *Orchestrator) ensurePlan(ctx context.Context, sCtx *agent.SwarmContext,
 	return nil
 }
 
-// filesTouchedThisRound lists the files this round's work produced.
+// filesTouchedThisRound lists the files this round's work actually produced.
 //
-// Without this the task would carry no file list at all on a first run: the
-// planner cannot know the paths ahead of time, and CompleteTask only fills the
-// list after acceptance. The verification gate needs it before it runs, so the
-// paths come from what the coder actually wrote.
-func filesTouchedThisRound(sCtx *agent.SwarmContext, files []domain.CodeFile) []string {
-	if len(files) == 0 {
-		return nil
+// It diffs against the state from before the coder ran, rather than returning
+// every file in the workspace. The file set is cumulative across rounds, so the
+// undiffed version handed the fifth task every file the project had produced so
+// far: the gate then checked files the task never claimed, and a task whose real
+// deliverable was missing could still pass because the listed paths happened to
+// exist already.
+func filesTouchedThisRound(sCtx *agent.SwarmContext, before, after []domain.CodeFile) []string {
+	prior := make(map[string]string, len(before))
+	for _, f := range before {
+		prior[f.Path] = f.Content
 	}
+
 	active := sCtx.ActiveTaskSnapshot()
-	// When the task named files, trust it: the coder was told to produce them.
 	if active != nil && len(active.Files) > 0 {
+		// The task named its own files, which is a stronger statement than any
+		// diff: the coder was told to produce exactly these.
 		return active.Files
 	}
-	out := make([]string, 0, len(files))
-	for _, f := range files {
-		out = append(out, f.Path)
+
+	var out []string
+	for _, f := range after {
+		if prev, existed := prior[f.Path]; !existed || prev != f.Content {
+			out = append(out, f.Path)
+		}
 	}
 	return out
 }
