@@ -294,3 +294,65 @@ func TestProjectsHandler_PlanEndpoint(t *testing.T) {
 	}
 }
 
+func TestProjectsHandler_LedgerEndpoint(t *testing.T) {
+	projDir, reg := setupTestProject(t)
+	handler := NewProjectHandler(reg)
+
+	ref, err := reg.Register(projDir)
+	if err != nil {
+		t.Fatalf("failed to register project: %v", err)
+	}
+
+	// 1. Ledger when none exists should return 200 with empty array
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+ref.ID+"/ledger", nil)
+	rec := httptest.NewRecorder()
+	handler.HandleProjects(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for empty ledger, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var emptyLedger []workspace.ChangeLedgerEntry
+	if err := json.NewDecoder(rec.Body).Decode(&emptyLedger); err != nil {
+		t.Fatalf("failed to decode empty ledger: %v", err)
+	}
+	if len(emptyLedger) != 0 {
+		t.Errorf("expected 0 entries in empty ledger, got %d", len(emptyLedger))
+	}
+
+	// 2. Append a change record
+	entry := workspace.ChangeLedgerEntry{
+		ID:     "C-0010",
+		TaskID: "T-001",
+		File:   "main.go",
+		Agent:  "Coder",
+		Commit: "hash-999",
+		Reason: "Implement health check",
+		Tests: &workspace.TestLedgerRecord{
+			Ran:    []string{"go test ./..."},
+			Result: "PASS",
+		},
+	}
+	if err := workspace.RecordProjectChange(ref.Root, entry); err != nil {
+		t.Fatalf("failed to record project change: %v", err)
+	}
+
+	// 3. Query ledger endpoint again
+	req = httptest.NewRequest(http.MethodGet, "/api/projects/"+ref.ID+"/ledger", nil)
+	rec = httptest.NewRecorder()
+	handler.HandleProjects(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for saved ledger, got %d", rec.Code)
+	}
+	var loadedLedger []workspace.ChangeLedgerEntry
+	if err := json.NewDecoder(rec.Body).Decode(&loadedLedger); err != nil {
+		t.Fatalf("failed to decode saved ledger: %v", err)
+	}
+	if len(loadedLedger) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(loadedLedger))
+	}
+	if loadedLedger[0].ID != "C-0010" || loadedLedger[0].File != "main.go" || loadedLedger[0].Agent != "Coder" {
+		t.Errorf("unexpected ledger entry: %+v", loadedLedger[0])
+	}
+}
+

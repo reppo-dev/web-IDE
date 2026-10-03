@@ -140,3 +140,63 @@ func TestBrainFS_ConcurrentAccess(t *testing.T) {
 		t.Errorf("state UpdatedAt is empty")
 	}
 }
+
+func TestBrainFS_RecordChangeAndReadLedger(t *testing.T) {
+	tmpDir := t.TempDir()
+	brain, err := NewBrainFS(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create brain: %v", err)
+	}
+
+	entry1 := ChangeLedgerEntry{
+		ID:          "C-0001",
+		TaskID:      "TASK-1",
+		File:        "backend/main.go",
+		Agent:       "Coder",
+		Commit:      "commit-abc",
+		Reason:      "Add server listener",
+		DecisionRef: "D-001",
+		Constraints: []string{"Listen on port 8080"},
+		Tests: &TestLedgerRecord{
+			Ran:    []string{"go test ./..."},
+			Result: "PASS",
+		},
+	}
+
+	if err := brain.RecordChange(entry1); err != nil {
+		t.Fatalf("RecordChange failed: %v", err)
+	}
+
+	entry2 := ChangeLedgerEntry{
+		File:   "frontend/App.tsx",
+		Agent:  "Coder",
+		Reason: "Add navigation bar",
+	}
+	if err := brain.RecordChange(entry2); err != nil {
+		t.Fatalf("RecordChange failed: %v", err)
+	}
+
+	entries, err := brain.ReadLedger()
+	if err != nil {
+		t.Fatalf("ReadLedger failed: %v", err)
+	}
+
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	if entries[0].ID != "C-0001" || entries[0].File != "backend/main.go" || entries[0].Tests == nil || entries[0].Tests.Result != "PASS" {
+		t.Errorf("entry1 mismatch: %+v", entries[0])
+	}
+	if entries[1].ID == "" || entries[1].File != "frontend/App.tsx" || entries[1].Timestamp == "" {
+		t.Errorf("entry2 default ID/timestamp generation failed: %+v", entries[1])
+	}
+
+	// Test helper functions LoadProjectLedger & RecordProjectChange
+	loaded, err := LoadProjectLedger(tmpDir)
+	if err != nil {
+		t.Fatalf("LoadProjectLedger failed: %v", err)
+	}
+	if len(loaded) != 2 {
+		t.Fatalf("expected 2 loaded entries via helper, got %d", len(loaded))
+	}
+}

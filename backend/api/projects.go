@@ -37,6 +37,7 @@ func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
 //	GET    /api/projects/{id}             one project's file tree
 //	GET    /api/projects/{id}/file?path=  read one file
 //	GET    /api/projects/{id}/plan        read project plan (.project/plan.json)
+//	GET    /api/projects/{id}/ledger      read project change ledger (.project/ledger.jsonl)
 func (h *ProjectHandler) HandleProjects(w http.ResponseWriter, r *http.Request) {
 	if h.registry == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "project registry unavailable"})
@@ -67,6 +68,10 @@ func (h *ProjectHandler) HandleProjects(w http.ResponseWriter, r *http.Request) 
 		}
 		if sub == "plan" {
 			h.readPlan(w, r, id)
+			return
+		}
+		if sub == "ledger" {
+			h.readLedger(w, r, id)
 			return
 		}
 		h.tree(w, r, id)
@@ -214,6 +219,27 @@ func (h *ProjectHandler) readPlan(w http.ResponseWriter, r *http.Request, id str
 	}
 
 	writeJSON(w, http.StatusOK, plan)
+}
+
+// readLedger serves the project's change history from .project/ledger.jsonl.
+func (h *ProjectHandler) readLedger(w http.ResponseWriter, r *http.Request, id string) {
+	ref, err := h.registry.Lookup(id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+
+	entries, err := workspace.LoadProjectLedger(ref.Root)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	if entries == nil {
+		entries = []workspace.ChangeLedgerEntry{}
+	}
+
+	writeJSON(w, http.StatusOK, entries)
 }
 
 // safeJoin resolves rel against root and refuses any result outside root.

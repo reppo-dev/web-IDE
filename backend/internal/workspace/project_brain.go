@@ -36,13 +36,33 @@ const (
 	TaskWaitingForHuman TaskStatus = "WAITING_FOR_HUMAN"
 )
 
-// LedgerEntry represents an immutable, append-only record in ledger.jsonl.
+// LedgerEntry represents a legacy record in ledger.jsonl.
 type LedgerEntry struct {
 	Timestamp string `json:"timestamp"`
 	Event     string `json:"event"`
 	Agent     string `json:"agent"`
 	Details   string `json:"details"`
 	Commit    string `json:"commit,omitempty"`
+}
+
+// ChangeLedgerEntry records a structured, immutable change record in ledger.jsonl (PROJECT_VISION §30).
+type ChangeLedgerEntry struct {
+	ID          string            `json:"id"`
+	TaskID      string            `json:"task_id,omitempty"`
+	File        string            `json:"file"`
+	Agent       string            `json:"agent"`
+	Commit      string            `json:"commit,omitempty"`
+	Reason      string            `json:"reason"`
+	DecisionRef string            `json:"decision_ref,omitempty"`
+	Constraints []string          `json:"constraints,omitempty"`
+	Tests       *TestLedgerRecord `json:"tests,omitempty"`
+	Timestamp   string            `json:"timestamp"`
+}
+
+// TestLedgerRecord records test execution results associated with a change.
+type TestLedgerRecord struct {
+	Ran    []string `json:"ran,omitempty"`
+	Result string   `json:"result,omitempty"`
 }
 
 // ProjectState represents the runtime state stored in state.json.
@@ -189,6 +209,84 @@ func (b *BrainFS) AppendLedger(event, agent, details, commit string) error {
 	_, err = f.Write(append(data, '\n'))
 	return err
 }
+
+// RecordChange appends an immutable change record according to PROJECT_VISION §30.
+func (b *BrainFS) RecordChange(entry ChangeLedgerEntry) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if entry.Timestamp == "" {
+		entry.Timestamp = time.Now().UTC().Format(time.RFC3339)
+	}
+	if entry.ID == "" {
+		entry.ID = fmt.Sprintf("C-%04d", time.Now().UnixNano()%100000)
+	}
+
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("failed to encode change ledger entry: %w", err)
+	}
+
+	f, err := os.OpenFile(filepath.Join(b.dir, FileLedger), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open ledger: %w", err)
+	}
+	defer f.Close()
+
+	_, err = f.Write(append(data, '\n'))
+	return err
+}
+
+// ReadLedger reads all ChangeLedgerEntry lines from ledger.jsonl.
+func (b *BrainFS) ReadLedger() ([]ChangeLedgerEntry, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	path := filepath.Join(b.dir, FileLedger)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []ChangeLedgerEntry{}, nil
+		}
+		return nil, fmt.Errorf("failed to read ledger: %w", err)
+	}
+
+	var entries []ChangeLedgerEntry
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		var entry ChangeLedgerEntry
+		if err := json.Unmarshal([]byte(trimmed), &entry); err == nil && entry.File != "" {
+			entries = append(entries, entry)
+		}
+	}
+	if entries == nil {
+		entries = []ChangeLedgerEntry{}
+	}
+	return entries, nil
+}
+
+// RecordProjectChange is a convenience helper for appending to the project change ledger.
+func RecordProjectChange(root string, entry ChangeLedgerEntry) error {
+	brain, err := NewBrainFS(root)
+	if err != nil {
+		return err
+	}
+	return brain.RecordChange(entry)
+}
+
+// LoadProjectLedger is a convenience helper for reading the project change ledger.
+func LoadProjectLedger(root string) ([]ChangeLedgerEntry, error) {
+	brain, err := NewBrainFS(root)
+	if err != nil {
+		return nil, err
+	}
+	return brain.ReadLedger()
+}
+
 
 // ReadState returns the current state.json.
 func (b *BrainFS) ReadState() (*ProjectState, error) {

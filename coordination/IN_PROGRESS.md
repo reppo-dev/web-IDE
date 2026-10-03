@@ -3,6 +3,16 @@
 > **قانون: اگر فایلی اینجا رزرو شده، دست به آن نمی‌زنید.**
 > اگر فایلی که می‌خواهید تغییر دهید اینجاست، منتظر بمانید یا فایل دیگری بردارید.
 
+### ✅ Antigravity — ۲۰۲۶-۱۰-۰۳ ۲۳:۱۵ (تمام شد)
+- `backend/internal/workspace/project_brain.go` — ساختار دقیق ChangeLedgerEntry بر اساس بند ۳۰ سند ویژن و متدهای RecordChange و ReadLedger
+- `backend/internal/workspace/project_brain_test.go` — تست‌های ذخیره و خواندن Change Ledger در ledger.jsonl (۱۰۰٪ سبز)
+- `backend/internal/orchestrator/loop.go` — اتصال خودکار persistChangeLedger پس از اعتبارسنجی و ثبت کامیت
+- `backend/api/projects.go` — اندپوینت GET /api/projects/{id}/ledger برای دریافت تاریخچه تغییرات پروژه
+- `backend/api/projects_test.go` — تست اندپوینت لجر پروژه (TestProjectsHandler_LedgerEndpoint)
+
+**نتیجه:** لجر تغییرات تغییرناپذیر پروژه (Change Ledger طبق بند ۳۰ سند ویژن) به طور کامل پیاده‌سازی و تست شد. تمام ۱۲ پکیج بک‌اند ۱۰۰٪ سبز، بیلد فرانت‌اند تمیز و دیمون لایو روی پورت ۸۰۸۰. تمام فایل‌ها آزاد هستند.
+
+
 ### ✅ Antigravity — ۲۰۲۶-۱۰-۰۳ ۲۲:۴۵ (تمام شد)
 - `backend/internal/agent/verifier_test.go` — تست‌های گیت اعتبارسنجی مکانیکی و تست‌رانر (۱۰۰٪ سبز)
 - `backend/internal/agent/agent.go` — اضافه کردن SetTaskState برای تغییر وضعیت تسک‌ها به WAITING_FOR_HUMAN و غیره

@@ -3,6 +3,29 @@
 > این فایل متعلق به ایجنت Antigravity است.
 > اگر Claude اینجا را خواند، **دست به آن نزنید** — فقط بخوانید تا بدانید چه کرده.
 
+## ۲۰۲۶-۱۰-۰۳ ۲۳:۱۵ — پیاده‌سازی کامل لجر تغییرات تغییرناپذیر (Change Ledger §30) + اتصال به ارکستریتور و API
+
+۱. **پیاده‌سازی لجر در `backend/internal/workspace/project_brain.go`:**
+   - تعریف ساختار `ChangeLedgerEntry` و `TestLedgerRecord` طبق بند ۳۰ سند ویژن ۲.۰ (`.project/ledger.jsonl`).
+   - پیاده‌سازی متدهای `RecordChange` (افزودن به انتهای فایل به صورت اتمیک و امن) و `ReadLedger` (خواندن تمام سطور).
+   - توابع کمکی `RecordProjectChange` و `LoadProjectLedger`.
+   - تست کامل در `project_brain_test.go` (`TestBrainFS_RecordChangeAndReadLedger`).
+
+۲. **اتصال به چرخه کاری در `backend/internal/orchestrator/loop.go`:**
+   - متد `persistChangeLedger` برای ثبت خودکار کلیه فایل‌های تولید/ویرایش‌شده در هر دور همراه با شناسه تسک، پیام، کامیت گیت و نتیجه ارزیابی وریفایر.
+   - فراخوانی بلافاصله پس از `CommitRound` و ذخیره پلن.
+
+۳. **اندپوینت REST در `backend/api/projects.go`:**
+   - هندلر `readLedger` برای روت `GET /api/projects/{id}/ledger`.
+   - تست جامع `TestProjectsHandler_LedgerEndpoint` در `backend/api/projects_test.go`.
+
+۴. **سلامت کامل مخزن و بیلدها:**
+   - دستور `go test -count=1 ./internal/... ./api/...`: هر ۱۲ پکیج ۱۰۰٪ پاس شدند.
+   - دستور `go vet`: بدون هیچ خطا یا اخطاری.
+   - دستور `npm run build`: تمیز در ۳.۰۸ ثانیه.
+   - دیمون باینری جدید `nexusd.exe` اجرا شد و سرویس روی پورت ۸۰۸۰ سالم است.
+
+
 ## ۲۰۲۶-۱۰-۰۳ ۲۲:۴۵ — تست‌های Verifier Gate و اتصال کامل Plan & Task Board به API، وب‌سوکت و UI
 
 ۱. **نوشتن تست‌های جامع `backend/internal/agent/verifier_test.go`:**

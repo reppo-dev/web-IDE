@@ -317,10 +317,12 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 
 		// A git checkpoint per task, so a bad change can be rolled back without
 		// losing the work already accepted.
+		var commitHash string
 		if sCtx.ArbiterVerdict != nil {
-			_, _ = ws.CommitRound(ctx, sCtx.Round, sCtx.ArbiterVerdict.FinalScore, sCtx.ArbiterVerdict.Summary)
+			commitHash, _ = ws.CommitRound(ctx, sCtx.Round, sCtx.ArbiterVerdict.FinalScore, sCtx.ArbiterVerdict.Summary)
 		}
 		o.persistPlan(sCtx, ws)
+		o.persistChangeLedger(task, touched, commitHash, verdict, ws)
 
 		// 6. Finish only on a real completion signal.
 		if sCtx.ArbiterVerdict != nil && sCtx.ArbiterVerdict.Passed {
@@ -468,5 +470,39 @@ func (o *Orchestrator) persistPlan(sCtx *agent.SwarmContext, ws *workspace.Works
 	}
 	if err := brain.RenderTasks(plan); err != nil {
 		log.Printf("failed to render task board: %v", err)
+	}
+}
+
+// persistChangeLedger writes an immutable change record to .project/ledger.jsonl
+// after each round according to PROJECT_VISION §30.
+func (o *Orchestrator) persistChangeLedger(task *domain.ProjectTask, touched []string, commitHash string, verdict *agent.TaskVerdict, ws *workspace.Workspace) {
+	if ws == nil || len(touched) == 0 {
+		return
+	}
+	brain, err := workspace.NewBrainFS(ws.Path())
+	if err != nil {
+		return
+	}
+	taskID := ""
+	reason := ""
+	if task != nil {
+		taskID = task.ID
+		reason = task.Title
+	}
+	for _, f := range touched {
+		var testRec *workspace.TestLedgerRecord
+		if verdict != nil {
+			testRec = &workspace.TestLedgerRecord{
+				Result: verdict.Summary,
+			}
+		}
+		_ = brain.RecordChange(workspace.ChangeLedgerEntry{
+			TaskID: taskID,
+			File:   f,
+			Agent:  string(domain.RoleCoder),
+			Commit: commitHash,
+			Reason: reason,
+			Tests:  testRec,
+		})
 	}
 }
