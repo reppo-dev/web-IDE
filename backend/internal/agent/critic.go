@@ -73,8 +73,10 @@ Your role:
 		APIKey:       apiKey,
 		BaseURL:      baseURL,
 	})
+	actualModel := cleanModel
 	if err != nil {
 		if cleanModel != "flash_5" {
+			actualModel = "flash_5"
 			resp, err = cr.llmClient.Generate(ctx, llm.Request{
 				Model:        "flash_5",
 				SystemPrompt: systemPrompt,
@@ -87,6 +89,11 @@ Your role:
 		if err != nil {
 			return nil, fmt.Errorf("critic review failed: %w", err)
 		}
+	}
+
+	var usage *domain.AgentUsage
+	if resp != nil {
+		usage = sCtx.RecordAgentUsage(string(domain.RoleCritic), actualModel, resp.PromptTokens, resp.OutputTokens)
 	}
 
 	var payload domain.CriticPayload
@@ -145,7 +152,11 @@ Your role:
 	if reason == "" {
 		reason = "بررسی کیفیت، ساختار و پایداری کد برای کشف باگ‌ها و مشکلات عملکردی."
 	}
-	return cr.createMessageWithReasoning(sCtx, domain.MsgCriticReview, payload, summary, reason)
+	msg, err := cr.createMessageWithReasoning(sCtx, domain.MsgCriticReview, payload, summary, reason)
+	if err == nil && msg != nil && usage != nil {
+		msg.Tokens = usage
+	}
+	return msg, err
 }
 
 func countCritical(issues []domain.ReviewIssue) int {

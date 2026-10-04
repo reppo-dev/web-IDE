@@ -37,6 +37,15 @@ export interface ArbiterVerdict {
   summary: string;
 }
 
+export interface AgentUsage {
+  agent: string;
+  model?: string;
+  prompt_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  calls_count: number;
+}
+
 export interface AgentMessage {
   id: string;
   from: AgentRole;
@@ -47,6 +56,7 @@ export interface AgentMessage {
   summary?: string;
   reasoning?: string;
   timestamp: string;
+  tokens?: AgentUsage;
 }
 
 export interface MemoryEntry {
@@ -73,7 +83,7 @@ export interface SkillManifest {
   enabled: boolean;
 }
 
-export type TaskState = 'TODO' | 'IN_PROGRESS' | 'DONE' | 'BLOCKED' | 'REWORK' | 'WAITING_FOR_HUMAN';
+export type TaskState = 'TODO' | 'IN_PROGRESS' | 'DONE' | 'BLOCKED' | 'REWORK' | 'WAITING_FOR_HUMAN' | 'CANCELLED' | 'FAILED';
 
 export interface ProjectTask {
   id: string;
@@ -82,6 +92,10 @@ export interface ProjectTask {
   state: TaskState;
   files?: string[];
   round?: number;
+  /** How many times this task went back for rework before it was handed over. */
+  rework_count?: number;
+  /** Why the team could not close it, so the next step is not a guess. */
+  last_error?: string;
 }
 
 export interface ProjectPlan {
@@ -121,6 +135,7 @@ export interface SwarmEvent {
   files?: CodeFile[];
   payload?: any;
   plan?: ProjectPlan;
+  usage?: Record<string, AgentUsage>;
   timestamp: string;
   /** teams_data: every team the user has saved. */
   teams?: Team[];

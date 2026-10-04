@@ -191,4 +191,38 @@ func TestSettledStatesDoNotReportComplete(t *testing.T) {
 	if plan.Completed() {
 		t.Error("a cancelled task is not completed work")
 	}
+	// Cancelled work is still work the user did not get, so it stays visible in
+	// the outstanding list. Dropping it there would let the end-of-run report
+	// claim nothing was left while its own tally showed an unfinished task.
+	if got := plan.Outstanding(); len(got) != 1 {
+		t.Errorf("a cancelled task should remain listed as outstanding, got %d entries", len(got))
+	}
+}
+
+// TestRunEndCountsAlwaysAddUp guards the report against contradicting itself.
+// Each task must land in exactly one bucket, or the headline number disagrees
+// with the detail beneath it.
+func TestRunEndCountsAlwaysAddUp(t *testing.T) {
+	plan := &domain.ProjectPlan{
+		Goal: "g",
+		Tasks: []domain.ProjectTask{
+			{ID: "T-001", Title: "done", State: domain.TaskDone},
+			{ID: "T-002", Title: "blocked", State: domain.TaskBlocked},
+			{ID: "T-003", Title: "failed", State: domain.TaskFailed},
+			{ID: "T-004", Title: "cancelled", State: domain.TaskCancelled},
+		},
+	}
+
+	report := describeRunEnd(plan)
+	if !strings.Contains(report, "3 of 4 tasks are still open") {
+		t.Errorf("headline count is wrong for a plan of done/blocked/failed/cancelled:\n%s", report)
+	}
+	for _, want := range []string{"T-002", "T-003", "T-004"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("report should list %q:\n%s", want, report)
+		}
+	}
+	if strings.Contains(report, "T-001 ") {
+		t.Errorf("a done task should not be listed as open:\n%s", report)
+	}
 }

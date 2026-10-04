@@ -28,6 +28,7 @@ func (o *Orchestrator) runArchitect(ctx context.Context, sCtx *agent.SwarmContex
 	o.broadcast(SwarmEvent{
 		Type: EventAgentOutput, ProjectID: projectID, Round: sCtx.Round,
 		Agent: domain.RoleArchitect, Message: msg,
+		Usage: sCtx.UsageSnapshot(),
 	})
 	return msg, nil
 }
@@ -72,6 +73,7 @@ func (o *Orchestrator) runReview(ctx context.Context, sCtx *agent.SwarmContext, 
 		o.broadcast(SwarmEvent{
 			Type: EventAgentOutput, ProjectID: projectID, Round: sCtx.Round,
 			Agent: role, Message: msg,
+			Usage: sCtx.UsageSnapshot(),
 		})
 		return msg, nil
 	}
@@ -190,7 +192,11 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 					Round:     sCtx.Round,
 					Verdict:   sCtx.ArbiterVerdict,
 					Files:     sCtx.CodeFiles,
-					Payload:   report,
+					// Plan travels with the event so a client reading the plan
+					// rather than the prose can still tell a finished project
+					// from one that stopped with work outstanding.
+					Plan:    plan,
+					Payload: report,
 				})
 				log.Printf("run finished: %s", report)
 				return sCtx, nil
@@ -258,6 +264,7 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 		o.broadcast(SwarmEvent{
 			Type: EventAgentOutput, ProjectID: projectID, Round: sCtx.Round,
 			Agent: domain.RoleCoder, Message: coderMsg, Files: sCtx.CodeFiles,
+			Usage: sCtx.UsageSnapshot(),
 		})
 		o.broadcast(SwarmEvent{
 			Type: EventCodeUpdated, ProjectID: projectID, Round: sCtx.Round,
@@ -318,10 +325,12 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 		o.broadcast(SwarmEvent{
 			Type: EventAgentOutput, ProjectID: projectID, Round: sCtx.Round,
 			Agent: domain.RoleArbiter, Message: arbMsg, Verdict: sCtx.ArbiterVerdict,
+			Usage: sCtx.UsageSnapshot(),
 		})
 		o.broadcast(SwarmEvent{
 			Type: EventRoundComplete, ProjectID: projectID, Round: sCtx.Round,
 			Verdict: sCtx.ArbiterVerdict,
+			Usage:   sCtx.UsageSnapshot(),
 		})
 
 		// A git checkpoint per task, so a bad change can be rolled back without
@@ -338,6 +347,8 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 			o.broadcast(SwarmEvent{
 				Type: EventConsensusReached, ProjectID: projectID, Round: sCtx.Round,
 				Verdict: sCtx.ArbiterVerdict, Files: sCtx.CodeFiles,
+				Plan:    sCtx.PlanSnapshot(),
+				Usage:   sCtx.UsageSnapshot(),
 			})
 			return sCtx, nil
 		}

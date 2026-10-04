@@ -64,10 +64,64 @@ type SwarmContext struct {
 	// Detector runs the project build for the run_detector tool.
 	Detector func(root string) (string, error)
 
+	// UsageByAgent tracks cumulative token consumption per agent (PROJECT_VISION §37).
+	UsageByAgent map[string]*domain.AgentUsage
+
 	// mu guards the mutable fields above. Agents inside a phase run
 	// concurrently and all write to the same context, so without this a
 	// custom team's shared state would be corrupted.
 	mu sync.RWMutex
+}
+
+// RecordAgentUsage records token usage for an agent in a thread-safe manner (PROJECT_VISION §37).
+func (s *SwarmContext) RecordAgentUsage(agentName, modelName string, promptTokens, outputTokens int) *domain.AgentUsage {
+	if s == nil || agentName == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.UsageByAgent == nil {
+		s.UsageByAgent = make(map[string]*domain.AgentUsage)
+	}
+	usage, ok := s.UsageByAgent[agentName]
+	if !ok {
+		usage = &domain.AgentUsage{
+			Agent: agentName,
+			Model: modelName,
+		}
+		s.UsageByAgent[agentName] = usage
+	}
+	if modelName != "" {
+		usage.Model = modelName
+	}
+	usage.PromptTokens += promptTokens
+	usage.OutputTokens += outputTokens
+	usage.TotalTokens = usage.PromptTokens + usage.OutputTokens
+	usage.CallsCount++
+
+	copyUsage := *usage
+	return &copyUsage
+}
+
+// UsageSnapshot returns an immutable snapshot of all agents' token usage.
+func (s *SwarmContext) UsageSnapshot() map[string]domain.AgentUsage {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if len(s.UsageByAgent) == 0 {
+		return nil
+	}
+	out := make(map[string]domain.AgentUsage, len(s.UsageByAgent))
+	for k, v := range s.UsageByAgent {
+		if v != nil {
+			out[k] = *v
+		}
+	}
+	return out
 }
 
 // PlanSnapshot returns a copy of the plan with a deep copy of its task slice,
@@ -713,6 +767,10 @@ func (b *BaseAgent) Discuss(ctx context.Context, sCtx *SwarmContext, history []*
 		APIKey:       apiKey,
 		BaseURL:      baseURL,
 	})
+	var usage *domain.AgentUsage
+	if resp != nil {
+		usage = sCtx.RecordAgentUsage(string(b.role), cleanModel, resp.PromptTokens, resp.OutputTokens)
+	}
 	if err != nil || resp == nil {
 		log.Printf("Discussion agent %s (%s) unavailable (%v); providing safe fallback reply", b.role, cleanModel, err)
 		fallbackPayload := map[string]string{
@@ -789,7 +847,11 @@ func (b *BaseAgent) Discuss(ctx context.Context, sCtx *SwarmContext, history []*
 		msgType = domain.MsgArbiterVerdict
 	}
 
-	return b.createMessageWithReasoning(sCtx, msgType, parsed, summary, reason)
+	msg, err := b.createMessageWithReasoning(sCtx, msgType, parsed, summary, reason)
+	if err == nil && msg != nil && usage != nil {
+		msg.Tokens = usage
+	}
+	return msg, err
 }
 
 

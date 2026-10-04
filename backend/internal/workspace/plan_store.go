@@ -94,7 +94,7 @@ func (b *BrainFS) RenderTasks(plan *domain.ProjectPlan) error {
 	var sb strings.Builder
 	sb.WriteString("# Project Tasks\n")
 	sb.WriteString("> The work list that must be finished for the project to be complete.\n")
-	sb.WriteString("> States: TODO | IN_PROGRESS | DONE | BLOCKED | REWORK | WAITING_FOR_HUMAN\n\n")
+	sb.WriteString("> States: TODO | IN_PROGRESS | DONE | BLOCKED | REWORK | WAITING_FOR_HUMAN | CANCELLED | FAILED\n\n")
 	sb.WriteString(fmt.Sprintf("**Goal:** %s\n\n", plan.Goal))
 
 	done, total, percent := plan.Progress()

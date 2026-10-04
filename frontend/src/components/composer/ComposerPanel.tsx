@@ -23,9 +23,12 @@ import {
   Settings2,
   ListTodo,
   Clock,
-  AlertCircle
+  AlertCircle,
+  XCircle,
+  Zap,
+  BarChart3
 } from 'lucide-react';
-import { AgentMessage, ArbiterVerdict, ExecutionMode, AgentRole, ProjectPlan } from '../../types';
+import { AgentMessage, ArbiterVerdict, ExecutionMode, AgentRole, ProjectPlan, AgentUsage } from '../../types';
 import { AVAILABLE_MODELS, SWARM_PRESETS, SwarmPreset } from '../../config/models';
 import { Team } from '../../types/team';
 
@@ -53,6 +56,8 @@ interface ComposerPanelProps {
   onOpenTeamBuilder?: () => void;
   /** Active project plan and tasks. */
   plan?: ProjectPlan | null;
+  /** Cumulative token usage per agent (PROJECT_VISION §37). */
+  usage?: Record<string, AgentUsage>;
 }
 
 // Helper to render simple markdown cleanly without heavy external libs
@@ -170,13 +175,20 @@ export const ComposerPanel: React.FC<ComposerPanelProps> = ({
   onSelectTeam,
   onOpenTeamBuilder,
   plan,
+  usage,
 }) => {
   const [prompt, setPrompt] = useState('');
   const [showRoster, setShowRoster] = useState(false);
   const [showPlanBoard, setShowPlanBoard] = useState(true);
+  const [showUsageDetails, setShowUsageDetails] = useState(false);
   const [customModelInputs, setCustomModelInputs] = useState<Record<string, string>>({});
   // Track open/collapsed deliberation accordions by turn ID
   const [collapsedTurns, setCollapsedTurns] = useState<Record<string, boolean>>({});
+
+  const usageEntries = usage ? Object.values(usage) : [];
+  const totalTokens = usageEntries.reduce((sum, u) => sum + (u.total_tokens || 0), 0);
+  const totalPromptTokens = usageEntries.reduce((sum, u) => sum + (u.prompt_tokens || 0), 0);
+  const totalOutputTokens = usageEntries.reduce((sum, u) => sum + (u.output_tokens || 0), 0);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -587,18 +599,47 @@ export const ComposerPanel: React.FC<ComposerPanelProps> = ({
                     badgeColor = 'bg-purple-950/60 text-purple-300 border-purple-800/50';
                     stateLabel = 'نیاز به کاربر';
                     stateIcon = <AlertCircle size={11} className="text-purple-400" />;
+                  } else if (task.state === 'FAILED') {
+                    badgeColor = 'bg-rose-950/60 text-rose-300 border-rose-800/50';
+                    stateLabel = 'ناموفق';
+                    stateIcon = <AlertTriangle size={11} className="text-rose-400" />;
+                  } else if (task.state === 'CANCELLED') {
+                    badgeColor = 'bg-zinc-800/70 text-zinc-500 border-zinc-700/60';
+                    stateLabel = 'لغو شد';
+                    stateIcon = <XCircle size={11} className="text-zinc-500" />;
                   }
 
+                  // A task handed back needs to say why. Without the reason the
+                  // board only shows that something stopped, which is the state
+                  // the user most needs information about.
+                  const needsAttention =
+                    task.last_error &&
+                    (task.state === 'WAITING_FOR_HUMAN' ||
+                      task.state === 'BLOCKED' ||
+                      task.state === 'FAILED' ||
+                      task.state === 'REWORK');
+
                   return (
-                    <div key={task.id} className="flex items-center justify-between p-1.5 rounded bg-[#1a1a1a] border border-[#262626] text-[10px]">
-                      <div className="flex items-center gap-1.5 truncate">
-                        {stateIcon}
-                        <span className="font-mono text-zinc-400 shrink-0">{task.id}</span>
-                        <span className="text-zinc-200 truncate">{task.title}</span>
+                    <div
+                      key={task.id}
+                      className="p-1.5 rounded bg-[#1a1a1a] border border-[#262626] text-[10px]"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 truncate">
+                          {stateIcon}
+                          <span className="font-mono text-zinc-400 shrink-0">{task.id}</span>
+                          <span className="text-zinc-200 truncate">{task.title}</span>
+                        </div>
+                        <span className={`px-1.5 py-0.5 rounded border text-[9px] font-medium shrink-0 flex items-center gap-1 ${badgeColor}`}>
+                          {stateLabel}
+                        </span>
                       </div>
-                      <span className={`px-1.5 py-0.5 rounded border text-[9px] font-medium shrink-0 flex items-center gap-1 ${badgeColor}`}>
-                        {stateLabel}
-                      </span>
+                      {needsAttention && (
+                        <div className="mt-1 pr-4 text-[9px] leading-relaxed text-amber-300/80">
+                          {task.last_error}
+                          {task.rework_count ? ` (${task.rework_count} تلاش)` : ''}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -608,6 +649,55 @@ export const ComposerPanel: React.FC<ComposerPanelProps> = ({
         );
       })()}
 
+      {/* Per-Agent Token Usage & Observability Bar (§37) */}
+      {totalTokens > 0 && (
+        <div className="border-b border-[#222222] bg-[#141414]/90 px-3 py-1.5 space-y-1.5 transition-all text-[11px]">
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setShowUsageDetails(!showUsageDetails)}
+              className="flex items-center gap-1.5 font-semibold text-zinc-300 hover:text-white transition-colors"
+            >
+              <Zap size={13} className="text-amber-400" />
+              <span>مصرف توکن ایجنت‌ها (§37)</span>
+              <span className="font-mono text-[10px] text-amber-400/90 bg-amber-950/60 border border-amber-800/40 px-1.5 py-0.2 rounded">
+                {totalTokens.toLocaleString()} توکن
+              </span>
+              {showUsageDetails ? <ChevronUp size={11} className="text-zinc-500" /> : <ChevronDown size={11} className="text-zinc-500" />}
+            </button>
+            <span className="text-[10px] text-zinc-500 font-mono">
+              {totalPromptTokens.toLocaleString()} ورودی / {totalOutputTokens.toLocaleString()} خروجی
+            </span>
+          </div>
+
+          {showUsageDetails && (
+            <div className="grid grid-cols-2 gap-1 pt-1 border-t border-[#222222]">
+              {usageEntries.map((u) => {
+                const theme = getAgentTheme(u.agent);
+                return (
+                  <div
+                    key={u.agent}
+                    className="p-1.5 rounded bg-[#1a1a1a] border border-[#262626] text-[10px] flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-1 truncate">
+                      <span className={`w-1.5 h-1.5 rounded-full ${
+                        u.agent === 'architect' ? 'bg-blue-400' :
+                        u.agent === 'coder' ? 'bg-purple-400' :
+                        u.agent === 'critic' ? 'bg-rose-400' :
+                        u.agent === 'security' ? 'bg-emerald-400' : 'bg-amber-400'
+                      }`} />
+                      <span className="text-zinc-300 truncate">{theme.faLabel}</span>
+                    </div>
+                    <div className="font-mono text-amber-400/90 text-[9px]">
+                      {u.total_tokens.toLocaleString()}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Messages stream */}
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
@@ -763,6 +853,12 @@ export const ComposerPanel: React.FC<ComposerPanelProps> = ({
                                         {modelUsed}
                                       </span>
                                     )}
+                                    {m.tokens && m.tokens.total_tokens > 0 && (
+                                      <span className="text-[9px] font-mono text-amber-400/90 bg-amber-950/40 px-1 py-0.5 rounded border border-amber-800/40 flex items-center gap-0.5">
+                                        <Zap size={9} />
+                                        <span>{m.tokens.total_tokens.toLocaleString()} توکن</span>
+                                      </span>
+                                    )}
                                   </div>
                                   <span className="text-[9px] text-zinc-500 font-mono">
                                     گام {sIdx + 1} از ۵
@@ -829,9 +925,17 @@ export const ComposerPanel: React.FC<ComposerPanelProps> = ({
                         <Sparkles size={14} className="text-amber-400 animate-pulse" />
                         <span>✨ تصمیم و پاسخ نهایی تیم هوش مصنوعی (NexusAI Consensus)</span>
                       </div>
-                      <span className="text-[9px] px-2 py-0.5 rounded-full bg-indigo-900/60 border border-indigo-700/60 text-indigo-300 font-medium">
-                        خرد جمعی ۵ مدل
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {turn.finalDecision.tokens && turn.finalDecision.tokens.total_tokens > 0 && (
+                          <span className="text-[9px] font-mono text-amber-400/90 bg-amber-950/60 border border-amber-800/40 px-1.5 py-0.5 rounded flex items-center gap-1">
+                            <Zap size={9} />
+                            <span>{turn.finalDecision.tokens.total_tokens.toLocaleString()} توکن</span>
+                          </span>
+                        )}
+                        <span className="text-[9px] px-2 py-0.5 rounded-full bg-indigo-900/60 border border-indigo-700/60 text-indigo-300 font-medium">
+                          خرد جمعی ۵ مدل
+                        </span>
+                      </div>
                     </div>
 
                     {/* Final Overarching Response Content */}

@@ -65,6 +65,10 @@ Your role:
 		APIKey:       apiKey,
 		BaseURL:      baseURL,
 	})
+	var usage *domain.AgentUsage
+	if resp != nil {
+		usage = sCtx.RecordAgentUsage(string(domain.RoleSecurity), cleanModel, resp.PromptTokens, resp.OutputTokens)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("security audit failed: %w", err)
 	}
@@ -93,6 +97,10 @@ Your role:
 	if reason == "" {
 		reason = "اسکن امنیتی طبق استانداردهای OWASP و بررسی صحت ورودی‌ها."
 	}
-	return sec.createMessageWithReasoning(sCtx, domain.MsgSecurityReport, payload, summary, reason)
+	msg, err := sec.createMessageWithReasoning(sCtx, domain.MsgSecurityReport, payload, summary, reason)
+	if err == nil && msg != nil && usage != nil {
+		msg.Tokens = usage
+	}
+	return msg, err
 }
 

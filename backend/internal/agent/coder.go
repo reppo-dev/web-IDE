@@ -127,9 +127,11 @@ Your role:
 		APIKey:       apiKey,
 		BaseURL:      baseURL,
 	})
+	actualModel := cleanModel
 	if err != nil {
 		if cleanModel != "flash_5" {
 			log.Printf("Coder model %s failed or timed out (%v); falling back to flash_5", cleanModel, err)
+			actualModel = "flash_5"
 			resp, err = c.llmClient.Generate(ctx, llm.Request{
 				Model:        "flash_5",
 				SystemPrompt: systemPrompt,
@@ -142,6 +144,11 @@ Your role:
 		if err != nil {
 			return nil, fmt.Errorf("coder generation failed: %w", err)
 		}
+	}
+
+	var usage *domain.AgentUsage
+	if resp != nil {
+		usage = sCtx.RecordAgentUsage(string(domain.RoleCoder), actualModel, resp.PromptTokens, resp.OutputTokens)
 	}
 
 	var parsed coderResponse
@@ -166,7 +173,11 @@ Your role:
 	if reason == "" {
 		reason = "پیاده‌سازی کدهای تمیز و بدون باگ مطابق نیازهای پروژه."
 	}
-	return c.createMessageWithReasoning(sCtx, domain.MsgCodeDraft, parsed, summary, reason)
+	msg, err := c.createMessageWithReasoning(sCtx, domain.MsgCodeDraft, parsed, summary, reason)
+	if err == nil && msg != nil && usage != nil {
+		msg.Tokens = usage
+	}
+	return msg, err
 }
 
 

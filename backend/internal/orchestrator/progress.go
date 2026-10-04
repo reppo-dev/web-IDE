@@ -116,24 +116,34 @@ func describeRunEnd(plan *domain.ProjectPlan) string {
 
 	outstanding := plan.Outstanding()
 	if len(outstanding) == 0 {
-		return "The run ended with every task either finished or cancelled."
+		return "The run ended with every task either finished or dropped."
 	}
 
-	var done, escalated int
+	// Every task lands in exactly one bucket, so the counts always add up to the
+	// number of tasks and the report can never contradict itself.
+	var done, escalated, dropped int
 	for _, t := range plan.Tasks {
-		switch t.State {
-		case domain.TaskDone:
+		switch {
+		case t.State == domain.TaskDone:
 			done++
-		case domain.TaskWaiting, domain.TaskBlocked, domain.TaskFailed:
+		case t.State == domain.TaskCancelled:
+			dropped++
+		default:
 			escalated++
 		}
 	}
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Run finished, but %d of %d tasks are still open. ", len(outstanding), len(plan.Tasks))
-	fmt.Fprintf(&sb, "%d task(s) passed verification; %d could not be closed by the team and need your decision.\n\n",
-		done, escalated)
-	sb.WriteString("What is left:\n")
+	sb.WriteString(fmt.Sprintf("%d passed verification", done))
+	if escalated > 0 {
+		fmt.Fprintf(&sb, "; %d could not be closed by the team and need your decision", escalated)
+	}
+	if dropped > 0 {
+		fmt.Fprintf(&sb, "; %d were cancelled", dropped)
+	}
+	sb.WriteString(".\n\nWhat is left:\n")
+
 	for _, t := range outstanding {
 		fmt.Fprintf(&sb, "  [%s] %s — %s\n", t.State, t.ID, t.Title)
 		if t.Acceptance != "" {

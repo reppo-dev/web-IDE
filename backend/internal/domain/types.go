@@ -54,6 +54,7 @@ type AgentMessage struct {
 	Summary   string          `json:"summary,omitempty"`
 	Reasoning string          `json:"reasoning,omitempty"`
 	Timestamp time.Time       `json:"timestamp"`
+	Tokens    *AgentUsage     `json:"tokens,omitempty"`
 }
 
 // MemoryType classifies a persistent memory item.
@@ -177,3 +178,14 @@ type SwarmStatus struct {
 	ConsensusReached bool          `json:"consensus_reached"`
 	CurrentScore     float64       `json:"current_score"`
 }
+
+// AgentUsage records token consumption and invocation counts per agent (PROJECT_VISION §37).
+type AgentUsage struct {
+	Agent        string `json:"agent"`
+	Model        string `json:"model,omitempty"`
+	PromptTokens int    `json:"prompt_tokens"`
+	OutputTokens int    `json:"output_tokens"`
+	TotalTokens  int    `json:"total_tokens"`
+	CallsCount   int    `json:"calls_count"`
+}
+

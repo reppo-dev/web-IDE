@@ -37,9 +37,10 @@ type SwarmEvent struct {
 	Message   *domain.AgentMessage   `json:"message,omitempty"`
 	Verdict   *domain.ArbiterVerdict `json:"verdict,omitempty"`
 	Files     []domain.CodeFile      `json:"files,omitempty"`
-	Payload   interface{}            `json:"payload,omitempty"`
-	Plan      *domain.ProjectPlan    `json:"plan,omitempty"`
-	Timestamp time.Time              `json:"timestamp"`
+	Payload   interface{}                  `json:"payload,omitempty"`
+	Plan      *domain.ProjectPlan          `json:"plan,omitempty"`
+	Usage     map[string]domain.AgentUsage `json:"usage,omitempty"`
+	Timestamp time.Time                    `json:"timestamp"`
 }
 
 // Config holds runtime parameters for the orchestrator.
@@ -220,6 +221,7 @@ func (o *Orchestrator) runRelayDiscussion(ctx context.Context, sCtx *agent.Swarm
 			Round:     sCtx.Round,
 			Agent:     step.role,
 			Message:   msg,
+			Usage:     sCtx.UsageSnapshot(),
 		})
 	}
 
@@ -234,6 +236,7 @@ func (o *Orchestrator) runRelayDiscussion(ctx context.Context, sCtx *agent.Swarm
 		Round:     sCtx.Round,
 		Message:   lastMsg,
 		Payload:   sCtx.Intent,
+		Usage:     sCtx.UsageSnapshot(),
 	})
 
 	return sCtx, nil

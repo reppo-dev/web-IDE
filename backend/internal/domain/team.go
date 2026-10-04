@@ -175,13 +175,18 @@ func (p *ProjectPlan) Completed() bool {
 
 // Outstanding lists the tasks the swarm did not finish, so a run that ends can
 // tell the user precisely what is left instead of only saying "not done".
+//
+// It deliberately includes every settled-but-unfinished state. Excluding
+// cancelled or failed tasks here while AllDone counted them as settled made the
+// end-of-run report contradict itself: it would claim N tasks were open while
+// its own tallies showed every task accounted for.
 func (p *ProjectPlan) Outstanding() []ProjectTask {
 	if p == nil {
 		return nil
 	}
 	var out []ProjectTask
 	for _, t := range p.Tasks {
-		if t.State != TaskDone && t.State != TaskCancelled {
+		if t.State != TaskDone {
 			out = append(out, t)
 		}
 	}

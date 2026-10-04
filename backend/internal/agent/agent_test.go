@@ -305,3 +305,28 @@ func TestSendTaskBackToRework_RepeatedErrorEscalation(t *testing.T) {
 	}
 }
 
+func TestAgentUsageTracking(t *testing.T) {
+	sCtx := testContext("test prompt")
+
+	u1 := sCtx.RecordAgentUsage("coder", "gemini-flash", 100, 50)
+	if u1 == nil || u1.TotalTokens != 150 || u1.CallsCount != 1 {
+		t.Fatalf("unexpected usage 1: %+v", u1)
+	}
+
+	u2 := sCtx.RecordAgentUsage("coder", "gemini-flash", 200, 100)
+	if u2 == nil || u2.TotalTokens != 450 || u2.CallsCount != 2 {
+		t.Fatalf("unexpected usage 2: %+v", u2)
+	}
+
+	sCtx.RecordAgentUsage("critic", "claude-haiku", 80, 20)
+
+	snapshot := sCtx.UsageSnapshot()
+	if len(snapshot) != 2 {
+		t.Fatalf("expected 2 agents in snapshot, got %d", len(snapshot))
+	}
+	if snapshot["coder"].TotalTokens != 450 || snapshot["critic"].TotalTokens != 100 {
+		t.Fatalf("incorrect snapshot totals: %+v", snapshot)
+	}
+}
+
+

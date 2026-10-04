@@ -231,6 +231,10 @@ func (c *CustomAgent) executeWithTools(ctx context.Context, sCtx *SwarmContext, 
 	base.SystemPrompt = base.SystemPrompt + "\n\n" + ToolPrompt(sCtx.ToolsAccess)
 
 	res := loop.Run(ctx, base)
+	var usage *domain.AgentUsage
+	if sCtx != nil {
+		usage = sCtx.RecordAgentUsage(c.spec.Name, base.Model, res.PromptTokens, res.OutputTokens)
+	}
 	if res.Err != nil && !res.TimedOut {
 		return nil, fmt.Errorf("agent %q failed: %w", c.spec.Name, res.Err)
 	}
@@ -276,7 +280,11 @@ func (c *CustomAgent) executeWithTools(ctx context.Context, sCtx *SwarmContext, 
 	summary := fmt.Sprintf("%s completed its pass (%d tool call(s), %d turn(s)).",
 		c.spec.Name, len(res.ToolCalls), res.Turns)
 
-	return c.createMessageWithReasoning(sCtx, domain.MsgAgentReport, contentRaw, summary, res.Reasoning)
+	msg, err := c.createMessageWithReasoning(sCtx, domain.MsgAgentReport, contentRaw, summary, res.Reasoning)
+	if err == nil && msg != nil && usage != nil {
+		msg.Tokens = usage
+	}
+	return msg, err
 }
 
 // Execute runs the agent and returns a message the swarm can route.
@@ -309,6 +317,10 @@ func (c *CustomAgent) Execute(ctx context.Context, sCtx *SwarmContext) (*domain.
 	}
 
 	resp, err := c.llmClient.Generate(ctx, req)
+	var usage *domain.AgentUsage
+	if resp != nil && sCtx != nil {
+		usage = sCtx.RecordAgentUsage(c.spec.Name, req.Model, resp.PromptTokens, resp.OutputTokens)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("agent %q failed: %w", c.spec.Name, err)
 	}
@@ -338,8 +350,12 @@ func (c *CustomAgent) Execute(ctx context.Context, sCtx *SwarmContext) (*domain.
 		summary = resp.Reasoning
 	}
 
-	return c.createMessageWithReasoning(sCtx, domain.MsgAgentReport, contentRaw,
+	msg, err := c.createMessageWithReasoning(sCtx, domain.MsgAgentReport, contentRaw,
 		summary, resp.Reasoning)
+	if err == nil && msg != nil && usage != nil {
+		msg.Tokens = usage
+	}
+	return msg, err
 }
 
 // commitResult stores the agent's structured output on the shared context,

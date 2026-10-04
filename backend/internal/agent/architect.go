@@ -51,6 +51,9 @@ Guidance:
 		UserPrompt:   userPrompt,
 		JSONSchema:   map[string]interface{}{"type": "object"},
 	})
+	if resp != nil {
+		sCtx.RecordAgentUsage(string(domain.RoleArchitect), model, resp.PromptTokens, resp.OutputTokens)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("intent classification failed: %w", err)
 	}
@@ -152,6 +155,10 @@ Your role:
 		UserPrompt:   userPrompt,
 		JSONSchema:   map[string]interface{}{"type": "object"},
 	})
+	var usage *domain.AgentUsage
+	if resp != nil {
+		usage = sCtx.RecordAgentUsage(string(domain.RoleArchitect), cleanModel, resp.PromptTokens, resp.OutputTokens)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("architect generation failed: %w", err)
 	}
@@ -187,5 +194,9 @@ Your role:
 	if reason == "" {
 		reason = "تحلیل نیازمندی‌ها، لایه‌بندی معماری و ساختار فایل‌های پروژه."
 	}
-	return a.createMessageWithReasoning(sCtx, domain.MsgBlueprint, blueprint, summary, reason)
+	msg, err := a.createMessageWithReasoning(sCtx, domain.MsgBlueprint, blueprint, summary, reason)
+	if err == nil && msg != nil && usage != nil {
+		msg.Tokens = usage
+	}
+	return msg, err
 }

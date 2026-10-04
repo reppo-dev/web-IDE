@@ -195,18 +195,26 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 			ProjectID: projectID,
 			Round:     round,
 			Verdict:   verdict,
+			Usage:     sCtx.UsageSnapshot(),
 		})
 
-		// Every task verified, so the project is genuinely finished.
+		// Nothing left the team can pick up. That is not the same as everything
+		// being finished: a task can be settled by escalation rather than by
+		// passing its gate, and claiming "all tasks validated" in that case
+		// would report success on visibly unfinished work.
 		if sCtx.AllTasksDone() {
+			report := describeRunEnd(sCtx.PlanSnapshot())
 			o.broadcast(SwarmEvent{
 				Type:      EventConsensusReached,
 				ProjectID: projectID,
 				Round:     round,
 				Verdict:   verdict,
 				Files:     sCtx.CodeFiles,
-				Payload:   "همه‌ی تسک‌ها اعتبارسنجی شدند.",
+				Plan:      sCtx.PlanSnapshot(),
+				Usage:     sCtx.UsageSnapshot(),
+				Payload:   report,
 			})
+			log.Printf("team run finished: %s", report)
 			return sCtx, nil
 		}
 
@@ -217,6 +225,8 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 				Round:     round,
 				Verdict:   verdict,
 				Files:     sCtx.CodeFiles,
+				Plan:      sCtx.PlanSnapshot(),
+				Usage:     sCtx.UsageSnapshot(),
 			})
 			return sCtx, nil
 		}
@@ -257,19 +267,31 @@ func applyPlanToTeamVerdict(verdict *domain.ArbiterVerdict, sCtx *agent.SwarmCon
 	if verdict == nil {
 		return
 	}
-	_, open, hasPlan := sCtx.PlanProgress()
-	if hasPlan && open > 0 {
+	plan := sCtx.PlanSnapshot()
+	if plan == nil || len(plan.Tasks) == 0 {
+		return
+	}
+
+	// A passing verdict may only stand when the project is actually finished.
+	// When it is not, the summary says so and names how much is left, which is
+	// what the run will report if it ends on this round.
+	if !plan.Completed() {
 		verdict.Passed = false
 		verdict.NeedsRefinement = false
-		percent := 0.0
-		if p := sCtx.PlanSnapshot(); p != nil {
-			_, _, percent = p.Progress()
-		}
+		_, _, percent := plan.Progress()
+		outstanding := plan.Outstanding()
 		verdict.Summary = fmt.Sprintf(
 			"دور %d با امتیاز %.1f%% تمیز است، اما %d تسک هنوز باز است (%.0f%% کامل). ادامه می‌دهیم.",
-			round, score, open, percent)
+			round, score, len(outstanding), percent)
 		verdict.FeedbackToCoder = "به تسک بعدی بروید؛ پروژه هنوز تمام نشده است."
+		return
 	}
+
+	// Everything passed. Keep the team's own threshold, but make the summary say
+	// the work was verified rather than merely scored well.
+	verdict.Passed = score >= threshold
+	verdict.NeedsRefinement = !verdict.Passed
+	verdict.Summary = fmt.Sprintf("همه‌ی تسک‌ها اعتبارسنجی شدند (امتیاز %.1f%%).", score)
 }
 
 // teamFilesTouched lists the files one team round actually produced.
@@ -400,12 +422,14 @@ func (o *Orchestrator) stopIfConversational(ctx context.Context, sCtx *agent.Swa
 		Agent:     domain.RoleArchitect,
 		Message:   archMsg,
 		Payload:   sCtx.Intent,
+		Usage:     sCtx.UsageSnapshot(),
 	})
 	o.broadcast(SwarmEvent{
 		Type:      EventConsensusReached,
 		ProjectID: projectID,
 		Round:     sCtx.Round,
 		Payload:   sCtx.Intent,
+		Usage:     sCtx.UsageSnapshot(),
 	})
 	return true
 }
@@ -460,6 +484,7 @@ func (o *Orchestrator) runTeamPhases(ctx context.Context, sCtx *agent.SwarmConte
 					Agent:     spec.Role,
 					Message:   msg,
 					Files:     sCtx.CodeFiles,
+					Usage:     sCtx.UsageSnapshot(),
 				})
 			}()
 		}

@@ -68,6 +68,7 @@ IDE چند-ایجنتی که ایجنت‌های هوش مصنوعی با هم �
 | **تزریق تسک فعال به کانتکست کدنویس‌ها و بازبین‌ها (`activeTaskBrief`)** | کامل — Claude & Antigravity |
 | **سقف سخت Rework = ۳ و تشخیص تکرار خطا + ارتقا به `WAITING_FOR_HUMAN` (بند ۱۹)** | کامل — Claude & Antigravity |
 | **حفاظت و سانسور اسرار و توکن‌ها (`RedactSecrets` + `SafeReadPath` — بند ۲۵)** | کامل — Antigravity & Claude |
+| **تفکیک توکن‌ها و دفعات فراخوانی به‌ازای Agent و Model (§۳۷ Observability)** | کامل — Antigravity |
 
 ---
 

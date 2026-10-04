@@ -18,7 +18,8 @@ import {
   ReviewIssue, 
   MemoryEntry, 
   SkillManifest,
-  ProjectPlan
+  ProjectPlan,
+  AgentUsage
 } from './types';
 import { SwarmPreset, SWARM_PRESETS } from './config/models';
 import { TeamBuilderModal } from './components/teams/TeamBuilderModal';
@@ -86,6 +87,7 @@ export const App: React.FC = () => {
   const [stalled, setStalled] = useState<boolean>(false);
   const [currentRound, setCurrentRound] = useState<number>(1);
   const [thinkingAgent, setThinkingAgent] = useState<{ role: string, status: string } | null>(null);
+  const [agentUsage, setAgentUsage] = useState<Record<string, AgentUsage>>({});
 
   const handleUpdateAgentModel = (role: string, model: string) => {
     setAgentModels((prev) => {
@@ -185,6 +187,9 @@ export const App: React.FC = () => {
     const unsubStatus = wsClient.onStatus(setIsConnected);
 
     const unsubEvent = wsClient.onEvent((event) => {
+      if (event.usage) {
+        setAgentUsage((prev) => ({ ...prev, ...event.usage }));
+      }
       switch (event.type) {
         case 'round_started':
           setCurrentRound(event.round);
@@ -252,7 +257,7 @@ export const App: React.FC = () => {
           }
           break;
 
-        case 'consensus_reached':
+        case 'consensus_reached': {
           if (event.verdict) {
             setVerdict(event.verdict);
           }
@@ -263,11 +268,25 @@ export const App: React.FC = () => {
             setProjectPlan(event.plan);
           }
           setIsRunning(false);
-          setTerminalLogs((prev) => [
-            ...prev,
-            `[Swarm Consensus Reached] Final Quality Score: ${event.verdict?.final_score.toFixed(1)}% - Ready to merge!`
-          ]);
+
+          // The run ending is not the same as the project being finished. A run
+          // can end with tasks still open because the team could not close them,
+          // and announcing "ready to merge" in that case is how unfinished work
+          // gets mistaken for delivered work. The backend sends the real
+          // outcome in payload; it is used whenever present.
+          const unfinished = (event.plan?.tasks ?? []).filter(
+            (t) => t.state !== 'DONE' && t.state !== 'CANCELLED'
+          );
+          const summary =
+            (typeof event.payload === 'string' && event.payload.trim()) ||
+            (unfinished.length > 0
+              ? `Run finished. ${unfinished.length} task(s) still open: ` +
+                unfinished.map((t) => `${t.id} ${t.title}`).join(', ')
+              : `[Swarm Consensus Reached] Final Quality Score: ${event.verdict?.final_score.toFixed(1)}% - Ready to merge!`);
+
+          setTerminalLogs((prev) => [...prev, summary]);
           break;
+        }
 
         case 'plan_updated':
           if (event.plan) {
@@ -608,6 +627,7 @@ export const App: React.FC = () => {
       setProjectName(proj);
     }
     setIsRunning(true);
+    setAgentUsage({});
 
     // Append user prompt to messages
     setMessages((prev) => [
@@ -789,6 +809,7 @@ export const App: React.FC = () => {
             onSelectTeam={setSelectedTeamId}
             onOpenTeamBuilder={() => setShowTeamBuilder(true)}
             plan={projectPlan}
+            usage={agentUsage}
           />
         )}
 

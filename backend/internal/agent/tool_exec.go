@@ -76,6 +76,8 @@ type Result struct {
 	TimedOut bool
 	// Err is non-nil when the model never reached an answer.
 	Err error
+	PromptTokens int
+	OutputTokens int
 }
 
 // ToolHistory renders past tool results for the next model turn.
@@ -136,6 +138,8 @@ func (l *ToolLoop) Run(ctx context.Context, baseReq llm.Request) Result {
 			out.Err = fmt.Errorf("model returned nothing on turn %d", turn)
 			return out
 		}
+		out.PromptTokens += resp.PromptTokens
+		out.OutputTokens += resp.OutputTokens
 		if resp.Reasoning != "" {
 			out.Reasoning = resp.Reasoning
 		}

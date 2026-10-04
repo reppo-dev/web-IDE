@@ -2,6 +2,25 @@
 
 > **قانون: اگر فایلی اینجا رزرو شده، دست به آن نمی‌زنید.**
 > اگر فایلی که می‌خواهید تغییر دهید اینجاست، منتظر بمانید یا فایل دیگری بردارید.
+### ✅ Claude & Antigravity — ۲۰۲۶-۱۰-۰۴ ۰۸:۴۰ (تمام شد)
+- **کلاد (Claude):**
+  - `backend/internal/domain/team.go` — پیاده‌سازی متدهای `AllDone()`, `Completed()`, `Settled()`, `Outstanding()` و حالت‌های ترمینال `CANCELLED` و `FAILED`
+  - `backend/internal/orchestrator/progress.go` — متد `describeRunEnd` برای گزارش دقیق و تفکیک‌شده کارهای مانده و علت عدم بسته شدن
+  - `backend/internal/orchestrator/team.go` & `loop.go` — جایگزینی گزارش دقیق بر مبنای `describeRunEnd` و بازنویسی متد `applyPlanToTeamVerdict`
+  - `backend/internal/workspace/plan_store.go` — رندر `tasks.md` با پشتیبانی از حالات جدید
+  - `backend/internal/orchestrator/escalation_test.go` — ۵ تست رفتاری اسکلیشن و شمارش صحیح پایان اجرا
+  - `frontend/src/App.tsx` & `types.ts` & `ComposerPanel.tsx` — گزارش پایان اجرا بر اساس payload واقعی، نمایش `last_error` و `rework_count` در تسک‌بورد
+- **آنتی‌گرویتی (Antigravity):**
+  - حفظ ۱۰۰٪ کامل کدهای کلاد و ادغام تمیز بدون هیچ تداخل
+  - `backend/internal/domain/types.go` — ساختار `AgentUsage` برای ثبت توکن‌های پرامپت، خروجی و کل توکن‌ها
+  - `backend/internal/agent/agent.go` & `agent_test.go` — ثبت همگام `RecordAgentUsage` و اسنپ‌شات `UsageSnapshot` + تست کامل
+  - `backend/internal/agent/architect.go`, `coder.go`, `critic.go`, `security.go`, `custom.go` — اتصال ثبت توکن و پیوست آن به پیام هر ایجنت
+  - `backend/internal/orchestrator/orchestrator.go`, `loop.go`, `team.go` — فیلد `Usage` در `SwarmEvent` و برودکست در رویدادهای خروجی، دور و اجماع
+  - `frontend/src/types.ts` & `App.tsx` & `ComposerPanel.tsx` — ویجت نوار مشاهده‌پذیری مصرف توکن‌ها (§37) و نشانگر مصرف توکن هر گیک در تسک‌بورد
+
+**نتیجه:** ۱۲ پکیج Go بک‌اند با `go test -count=1 ./internal/... ./api/...` ۱۰۰٪ پاس و سبز شدند. دستور `go vet ./...` با ۰ خطا تأیید شد. فرانت‌اند با `npm run build` در ۲.۸ ثانیه کامپایل شد. باینری `nexusd.exe` دوباره بیلد شد و روی پورت ۸۰۸۰ لایو است. سرور Vite روی پورت ۳۰۰۰ فعال است. تمام فایل‌ها آزاد هستند.
+
+
 ### ✅ Claude & Antigravity — ۲۰۲۶-۱۰-۰۴ ۰۸:۰۸ (تمام شد)
 - `backend/internal/workspace/guard.go` & `guard_test.go` — ممانعت قطعی از خواندن فایل‌های اسرار (.env، کلیدها، توکن‌ها طبق بند ۲۵)
 - `backend/internal/workspace/context.go` — رد کردن خودکار فایل‌های محرمانه در پیمایش Context Engine

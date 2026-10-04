@@ -3,7 +3,32 @@
 > این فایل متعلق به ایجنت Antigravity است.
 > اگر Claude اینجا را خواند، **دست به آن نزنید** — فقط بخوانید تا بدانید چه کرده.
 
-## ۲۰۲۶-۱۰-۰۴ ۰۸:۰۸ — حفاظت و سانسور اسرار (بند ۲۵) + سقف Rework=3 و تشخیص تکرار خطا (بند ۱۹) با همکاری کلود
+## ۲۰۲۶-۱۰-۰۴ ۰۸:۴۰ — پیاده‌سازی کامل تفکیک و مشاهده‌پذیری توکن‌ها به‌ازای Agent و Model (§۳۷) + ادغام تمیز با کارهای اسکلیشن کلود
+
+۱. **ادغام بدون تداخل با تغییرات اسکلیشن کلود:**
+   - تغییرات عمیق کلود روی ماشین وضعیت (`Settled()`, `Outstanding()`, `Completed()`, `describeRunEnd`, `applyPlanToTeamVerdict`, `escalation_test.go`) به طور کامل حفظ و بدون حتی ۱ مورد تعارض با کدهای جدید تلفیق شدند.
+   - هر ۵ تست اسکلیشن کلود ۱۰۰٪ پاس شدند.
+
+۲. **تفکیک توکن‌ها و هزینه‌ها به‌ازای هر Agent و Model (بند ۳۷ سند ویژن):**
+   - **Domain:** تعریف ساختار `AgentUsage` شامل `Agent`, `Model`, `PromptTokens`, `OutputTokens`, `TotalTokens`, `CallsCount` در `backend/internal/domain/types.go` و پیوست به `AgentMessage.Tokens`.
+   - **SwarmContext:** پیاده‌سازی متد ترد-سیف `RecordAgentUsage` و `UsageSnapshot` در `backend/internal/agent/agent.go` و نوشتن تست اختصاصی `TestAgentUsageTracking` در `agent_test.go`.
+   - **Agent Execution:** اتصال ثبت توکن در تمامی فراخوانی‌های هوش مصنوعی در `architect.go` (شامل `classifyIntent` و `Execute`), `coder.go`, `critic.go`, `security.go`, `custom.go` (شامل `executeWithTools` و `Execute`) و `BaseAgent.Discuss`.
+   - **Orchestrator:** افزودن فیلد `Usage` به رویداد `SwarmEvent` در `orchestrator.go` و برودکست در رویدادهای `EventAgentOutput`, `EventRoundComplete`, `EventConsensusReached` در `loop.go` و `team.go`.
+
+۳. **رابط کاربری و مشاهده‌پذیری زنده فرانت‌اند:**
+   - افزودن `AgentUsage` به `frontend/src/types.ts` در `AgentMessage` و `SwarmEvent`.
+   - دریافت رویدادهای `event.usage` در `frontend/src/App.tsx` و پاس دادن به کامپوننت `ComposerPanel`.
+   - افزودن نوار مدرن و شکیل «📊 مصرف توکن ایجنت‌ها (§37)» در بالای کامپوزر با نمایش مجموع توکن‌های ورودی/خروجی و تفکیک هر ایجنت به صورت آکاردئونی.
+   - نمایش نشانگر مصرف توکن در هدر هر مرحله از تفکر ۵ مدل و کارت اجماع نهایی.
+
+۴. **تست و راستی‌آزمایی:**
+   - `go test -count=1 ./internal/... ./api/...`: **هر ۱۲ پکیج Go بک‌اند با ۱۰۰٪ موفقیت پاس شدند.**
+   - `go vet ./...`: کاملاً تمیز با ۰ خطا و اخطار.
+   - `npm run build`: بیلد فرانت‌اند در ۲.۸ ثانیه با موفقیت انجام شد.
+   - باینری جدید `nexusd.exe` دوباره کامپایل و روی پورت ۸۰۸۰ لایو است. سرور فرانت روی پورت ۳۰۰۰ در حال سرویس‌دهی است.
+
+---
+
 
 ۱. **ممانعت از خواندن فایل‌های محرمانه (`backend/internal/workspace/guard.go` & `context.go`):**
    - تابع `IsSecretPath` برای تشخیص فایل‌های حساس (`.env*`, `id_rsa*`, `*.pem`, `*.key`, `credentials.json`, `.npmrc` و غیره) پیاده شد.
