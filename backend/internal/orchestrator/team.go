@@ -153,15 +153,16 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 				// Park the task and move on. The round is not failed: another
 				// task may be free, and forcing the edit is what produces two
 				// agents disagreeing about the same file.
+				//
+				// This agent's own holds are dropped first. A team run advances one
+				// round per iteration, so anything left held here would still be
+				// held when the next round asks for it — turning a transient
+				// collision into a permanent one.
+				sCtx.ReleaseEverything("team")
+				o.stepLock(projectID, round, task.ID, domain.RoleCoder, claimReason)
 				sCtx.SendTaskBackToRework(claimReason)
 				o.persistPlan(sCtx, ws)
-				o.broadcast(SwarmEvent{
-					Type:    EventAgentOutput,
-					ProjectID: projectID,
-					Round:   round,
-					Agent:   domain.RoleCoder,
-					Payload: claimReason,
-				})
+				o.broadcastLocks(sCtx, projectID, round)
 				continue
 			}
 		}

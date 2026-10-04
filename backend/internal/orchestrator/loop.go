@@ -269,9 +269,17 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 			// Shown in the task's own card, not as a stray bubble: a blocked
 			// agent is the most confusing thing a user can watch happen, so it
 			// says which file, who holds it, and on what.
+			//
+			// Holds from earlier rounds are dropped before giving up on the task.
+			// If the task escalates to WAITING_FOR_HUMAN it will never be handed
+			// out again, so anything still held under its name would stay locked
+			// for the rest of the run — a temporary collision turned permanent by
+			// nothing more than the order these statements are written in.
+			sCtx.ReleaseEverything(string(domain.RoleCoder))
 			o.stepLock(projectID, sCtx.Round, task.ID, domain.RoleCoder, claimReason)
 			sCtx.SendTaskBackToRework(claimReason)
 			o.persistPlan(sCtx, ws)
+			o.broadcastLocks(sCtx, projectID, sCtx.Round)
 			continue
 		}
 		o.broadcastLocks(sCtx, projectID, sCtx.Round)

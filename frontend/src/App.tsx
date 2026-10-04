@@ -103,15 +103,12 @@ export const App: React.FC = () => {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [fileLocks, setFileLocks] = useState<FileLockInfo[]>([]);
 
-  /** Append one step to its task's stream, replacing it on a retry. */
-  const appendTaskStep = useCallback((taskId: string, step: TaskStreamStep, reset?: boolean, title?: string) => {
+  /** Append one step to its task's stream, replacing its contents on a retry. */
+  const appendTaskStep = useCallback((taskId: string, step: TaskStreamStep, reset?: boolean) => {
     setTaskStreams((prev) => {
       const existing = reset ? [] : (prev[taskId] ?? []);
       return { ...prev, [taskId]: [...existing, step] };
     });
-    if (title) {
-      setTaskStreamTitles((prev) => ({ ...prev, [taskId]: title }));
-    }
   }, []);
 
   const handleUpdateAgentModel = (role: string, model: string) => {
@@ -223,13 +220,11 @@ export const App: React.FC = () => {
           if (!event.task_id || !event.stream) break;
           appendTaskStep(event.task_id, event.stream, event.stream_reset);
           setActiveTaskId(event.task_id);
-          // The opening step carries the task title, so the card can be labelled
-          // without a second lookup.
-          if (event.stream_reset) {
-            const match = event.stream.text.match(/^(.*?):\s*(.+)$/);
-            if (match) {
-              setTaskStreamTitles((prev) => ({ ...prev, [event.task_id!]: match[2] }));
-            }
+          // The title travels with the event. It used to be recovered by parsing
+          // the opening step's prose, which broke the moment that sentence was
+          // reworded or translated.
+          if (event.task_title) {
+            setTaskStreamTitles((prev) => ({ ...prev, [event.task_id!]: event.task_title! }));
           }
           break;
         }

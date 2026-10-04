@@ -147,6 +147,8 @@ export interface SwarmEvent {
   team_id?: string;
   /** task_id: which task this event belongs to. Absent for run-level events. */
   task_id?: string;
+  /** task_title: the task's title, so the card needs no extra lookup. */
+  task_title?: string;
   /** task_step: one entry appended to a task's live card. */
   stream?: TaskStreamStep;
   /** task_step: start a fresh card, because the task is being retried. */

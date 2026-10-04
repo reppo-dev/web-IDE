@@ -130,6 +130,17 @@ func (s *SwarmContext) LockedFiles() []workspace.FileLock {
 	return s.FileLocks.Active()
 }
 
+// ReleaseEverything drops every hold an agent has.
+//
+// This is the correct call when an agent walks away from a task whose file set it
+// never established. The caller knows it must let go of everything it had, but
+// not which paths that was — the plan's file list and the files actually written
+// are rarely the same set, and a task that escalates will never be handed out
+// again, so anything left held would stay locked for the rest of the run.
+func (s *SwarmContext) ReleaseEverything(agent string) []string {
+	return s.ReleaseAllFiles(agent)
+}
+
 // RecordAgentUsage records token usage for an agent in a thread-safe manner (PROJECT_VISION §37).
 func (s *SwarmContext) RecordAgentUsage(agentName, modelName string, promptTokens, outputTokens int) *domain.AgentUsage {
 	if s == nil || agentName == "" {

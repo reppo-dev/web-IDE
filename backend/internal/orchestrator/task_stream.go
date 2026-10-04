@@ -35,6 +35,7 @@ func (o *Orchestrator) beginTaskStream(projectID string, round int, task *domain
 		ProjectID:   projectID,
 		Round:       round,
 		TaskID:      task.ID,
+		TaskTitle:   task.Title,
 		StreamReset: true,
 		Agent:       domain.RoleManager,
 		Stream: &TaskStreamStep{

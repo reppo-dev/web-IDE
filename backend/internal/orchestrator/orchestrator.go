@@ -53,7 +53,11 @@ type SwarmEvent struct {
 	// it and the card fills in as the work happens. TaskID names the stream and is
 	// empty for run-level events that belong to no single task.
 	TaskID string `json:"task_id,omitempty"`
-	Stream *TaskStreamStep `json:"stream,omitempty"`
+	// TaskTitle labels the card. It travels with the event rather than being
+	// parsed back out of a step's prose, which broke the moment that sentence was
+	// reworded or translated.
+	TaskTitle string          `json:"task_title,omitempty"`
+	Stream    *TaskStreamStep `json:"stream,omitempty"`
 	// StreamReset tells the client to start a fresh stream. A retried task needs
 	// this: its earlier attempts are history, not the current state of the work.
 	StreamReset bool `json:"stream_reset,omitempty"`
