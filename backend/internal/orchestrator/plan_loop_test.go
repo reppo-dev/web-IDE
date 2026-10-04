@@ -36,6 +36,9 @@ type scriptedLLM struct {
 	// tasksSeen records the active task title the coder was given each round,
 	// which is how a test proves the team moved on instead of repeating itself.
 	tasksSeen []string
+	// staticCode makes the coder return the same code files every round,
+	// allowing stall detection to trigger on unresolvable issues.
+	staticCode bool
 }
 
 func (s *scriptedLLM) Generate(ctx context.Context, req llm.Request) (*llm.Response, error) {
@@ -78,10 +81,14 @@ func (s *scriptedLLM) Generate(ctx context.Context, req llm.Request) (*llm.Respo
 		if t := activeTaskTitle(req.UserPrompt); t != "" {
 			s.tasksSeen = append(s.tasksSeen, t)
 		}
+		fileIdx := s.coderCalls
+		if s.staticCode {
+			fileIdx = 1
+		}
 		return &llm.Response{
 			Content: fmt.Sprintf(
 				`{"files":[{"path":"file%d.go","language":"go","content":"package main\n\n// build %d\n"}],"explanation":"work"}`,
-				s.coderCalls, s.coderCalls),
+				fileIdx, fileIdx),
 		}, nil
 
 	case strings.Contains(req.SystemPrompt, "relay discussion"):
@@ -96,10 +103,19 @@ func (s *scriptedLLM) Generate(ctx context.Context, req llm.Request) (*llm.Respo
 
 // activeTaskTitle pulls the task marker the loop writes into the coder prompt.
 func activeTaskTitle(prompt string) string {
-	const marker = "TASK:"
+	const marker = "TASK TITLE:"
 	idx := strings.Index(prompt, marker)
 	if idx < 0 {
-		return ""
+		const fallback = "TASK:"
+		idx = strings.Index(prompt, fallback)
+		if idx < 0 {
+			return ""
+		}
+		rest := prompt[idx+len(fallback):]
+		if nl := strings.Index(rest, "\n"); nl >= 0 {
+			rest = rest[:nl]
+		}
+		return strings.TrimSpace(rest)
 	}
 	rest := prompt[idx+len(marker):]
 	if nl := strings.Index(rest, "\n"); nl >= 0 {
@@ -341,6 +357,7 @@ func TestVerificationFailureBlocksTaskCompletion(t *testing.T) {
 	script := &scriptedLLM{
 		tasks:              testPlan(domain.ProjectTask{Title: "Never satisfied"}),
 		verifierGapsBefore: 1000, // never passes
+		staticCode:         true,
 	}
 	orch, _ := newScriptedOrchestrator(t, script)
 

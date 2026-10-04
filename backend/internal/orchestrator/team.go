@@ -57,6 +57,12 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 		ToolsAccess:    agent.AccessLevel(t.ToolsAccess),
 		ToolCallBudget: t.MaxToolCalls,
 		ToolTimeout:    4 * time.Minute,
+		AgentModels:    make(map[domain.AgentRole]string),
+	}
+	for _, spec := range specs {
+		if spec.Model != "" {
+			sCtx.AgentModels[spec.Role] = spec.Model
+		}
 	}
 	if sCtx.ToolsAccess == "" {
 		sCtx.ToolsAccess = agent.AccessReadOnly

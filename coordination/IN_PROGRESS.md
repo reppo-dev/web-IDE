@@ -2,6 +2,13 @@
 
 > **قانون: اگر فایلی اینجا رزرو شده، دست به آن نمی‌زنید.**
 > اگر فایلی که می‌خواهید تغییر دهید اینجاست، منتظر بمانید یا فایل دیگری بردارید.
+### ✅ Antigravity — ۲۰۲۶-۱۰-۰۴ ۰۷:۲۸ (تمام شد)
+- `backend/internal/orchestrator/team.go` — اضافه کردن map مدل‌ها (AgentModels) به sCtx در RunTeam
+- `backend/internal/orchestrator/team_test.go` — تنظیم دقیق SetActiveTask در TestTeamFilesTouched
+- `backend/internal/orchestrator/plan_loop_test.go` — استخراج صحیح TASK TITLE و شبیه‌سازی کدهای استاتیک برای تست استال (۱۰۰٪ سبز)
+
+**نتیجه:** تمام تست‌های جدید ارکستریتور و پلن‌محور در چند ثانیه ۱۰۰٪ پاس شدند. تمام فایل‌ها آزاد هستند.
+
 ### ✅ Claude & Antigravity — ۲۰۲۶-۱۰-۰۴ ۰۷:۱۸ (تمام شد)
 - `backend/internal/orchestrator/team.go` — اتصال کامل حلقه مبتنی بر پلن (Plan-Driven Loop)، ماشین وضعیت تسک‌ها، TaskVerifier، Change Ledger و تشخیص استال به RunTeam
 - `backend/internal/agent/custom.go` — پیاده‌سازی CustomAgent.BuildPlan برای طراحی پلن تیم و تزریق تسک فعال (activeTaskBrief) به تمام اعضای تیم

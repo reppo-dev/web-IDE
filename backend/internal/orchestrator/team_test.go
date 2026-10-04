@@ -234,11 +234,11 @@ func TestTeamFilesTouched(t *testing.T) {
 	}
 
 	// When active task explicitly declares files
+	task := domain.ProjectTask{ID: "T-001", Title: "Make Feature", State: domain.TaskInProgress, Files: []string{"explicit.go"}}
 	sCtx.SetPlan(&domain.ProjectPlan{
-		Tasks: []domain.ProjectTask{
-			{ID: "T-001", Title: "Make Feature", State: domain.TaskInProgress, Files: []string{"explicit.go"}},
-		},
+		Tasks: []domain.ProjectTask{task},
 	})
+	sCtx.SetActiveTask(&task)
 	touchedWithActive := teamFilesTouched(sCtx, before, after)
 	if len(touchedWithActive) != 1 || touchedWithActive[0] != "explicit.go" {
 		t.Errorf("expected explicit task files, got %v", touchedWithActive)
