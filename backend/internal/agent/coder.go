@@ -34,7 +34,10 @@ func (c *CoderAgent) Execute(ctx context.Context, sCtx *SwarmContext) (*domain.A
 Your role:
 - Write complete, robust, production-ready code with no placeholders or TODOs.
 - Include proper error handling, logging, concurrency safety, and comments.
-- Focus on the 1-3 essential files for the requested feature to maintain rapid generation latency.
+- When a specific TASK is given, implement exactly that task and produce every file it needs.
+  The task list is the work order: the project is finished only when every task passes review,
+  so a task that leaves out a required file is a task that will be sent back to you.
+- When no task is given, build the smallest coherent slice that actually runs.
 - If in Round 2 or higher, directly address and fix all bugs reported by the Critic and Security Auditor.
 - The EXISTING PROJECT CODE is provided below. Treat it as ground truth: match its
   package names, import paths, type names, and error handling style.

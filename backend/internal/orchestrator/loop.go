@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/nexusai/nexusai/backend/internal/agent"
 	"github.com/nexusai/nexusai/backend/internal/domain"
@@ -285,9 +287,26 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 		// arbiter's verdict is informed by evidence rather than by opinion.
 		verdict, err := verifier.Verify(ctx, sCtx)
 		if err != nil {
-			// A verification error is not a task failure. Surfacing it as one
-			// would send the task to rework for a reason it cannot fix.
-			return nil, fmt.Errorf("verification failed for task %s: %w", task.ID, err)
+			// A verification error means the gate could not run — a missing key,
+			// an unreachable provider. It is not evidence that the task is
+			// unfinished, and it is certainly not a reason to abandon the whole
+			// project. Ending the run here was how one credential problem turned
+			// into zero work done.
+			log.Printf("verification could not run for task %s: %v", task.ID, err)
+			o.broadcast(SwarmEvent{
+				Type:      EventAgentOutput,
+				ProjectID: projectID,
+				Round:     sCtx.Round,
+				Agent:     domain.RoleCritic,
+				Payload: fmt.Sprintf(
+					"تسک %s اعتبارسنجی نشد (%v). به‌عنوان انجام‌نشده علامت می‌خورد.", task.ID, err),
+			})
+			verdict = &agent.TaskVerdict{
+				TaskID:  task.ID,
+				Passed:  false,
+				Gaps:    []string{"verification could not be run: " + err.Error()},
+				Summary: "The verification gate could not run, so this task is not counted as done.",
+			}
 		}
 		sCtx.SetLastTaskVerdict(verdict)
 
@@ -385,10 +404,30 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 // The plan is loaded from disk when it exists so a resumed run continues where
 // it stopped instead of re-planning from scratch and losing finished work.
 func (o *Orchestrator) ensurePlan(ctx context.Context, sCtx *agent.SwarmContext, ws *workspace.Workspace) error {
+	// A plan already on disk is only resumed when it belongs to the request being
+	// made now. Loading it unconditionally meant a second, different request in
+	// the same project silently continued the first one's work: the user asked
+	// for something new and the swarm kept building the old thing. That is the
+	// most confusing failure this loop can have, because the output looks
+	// plausible and nothing reports an error.
 	if plan, err := workspace.LoadPlan(ws.Path()); err == nil && plan != nil && len(plan.Tasks) > 0 {
-		sCtx.SetPlan(plan)
-		log.Printf("resumed existing plan: %d tasks, %d done", len(plan.Tasks), countDone(plan))
-		return nil
+		if !planMatchesRequest(plan, sCtx.UserPrompt) {
+			log.Printf("existing plan does not match this request; building a new one")
+			// The old board is written to its own file so a user who meant to
+			// resume can still find it. Overwriting plan.json here would destroy
+			// it within one round, since persistPlan writes the new plan there.
+			if brain, bErr := workspace.NewBrainFS(ws.Path()); bErr == nil {
+				if path, aErr := brain.ArchivePlan(plan, "a different request was made in this project"); aErr != nil {
+					log.Printf("could not archive the previous plan: %v", aErr)
+				} else {
+					log.Printf("previous plan archived to %s", path)
+				}
+			}
+		} else {
+			sCtx.SetPlan(plan)
+			log.Printf("resumed existing plan: %d tasks, %d done", len(plan.Tasks), countDone(plan))
+			return nil
+		}
 	}
 
 	architect, ok := o.architect.(interface {
@@ -442,6 +481,76 @@ func filesTouchedThisRound(sCtx *agent.SwarmContext, before, after []domain.Code
 		if prev, existed := prior[f.Path]; !existed || prev != f.Content {
 			out = append(out, f.Path)
 		}
+	}
+	return out
+}
+
+// planMatchesRequest reports whether a stored plan was made for this request.
+//
+// The stored goal is the planner's one-line summary of the original request, so
+// it cannot be compared literally. What is compared is the vocabulary both texts
+// actually use: a request about a Duolingo clone and a stored plan about a
+// different app share almost no significant words, while a re-run of the same
+// request overlaps heavily. The threshold is deliberately strict — wrongly
+// rebuilding a plan loses a little time, while wrongly resuming an unrelated
+// one silently builds the wrong project.
+func planMatchesRequest(plan *domain.ProjectPlan, prompt string) bool {
+	if plan == nil || plan.Goal == "" || strings.TrimSpace(prompt) == "" {
+		return false
+	}
+	// A superseded plan is never resumed.
+	if strings.HasPrefix(plan.Goal, "(superseded)") {
+		return false
+	}
+
+	// Compare task titles too, not just the goal: they carry the concrete nouns.
+	existing := strings.ToLower(plan.Goal)
+	for _, t := range plan.Tasks {
+		existing += " " + strings.ToLower(t.Title)
+	}
+	wanted := strings.ToLower(prompt)
+
+	// Every meaningful word of the request should appear in the stored plan. Stop
+	// words are excluded because they carry no signal and would make unrelated
+	// requests look similar.
+	requestWords := significantWords(wanted)
+	if len(requestWords) == 0 {
+		return false
+	}
+	covered := 0
+	for _, w := range requestWords {
+		if strings.Contains(existing, w) {
+			covered++
+		}
+	}
+	return float64(covered)/float64(len(requestWords)) >= 0.7
+}
+
+// significantWords splits text into lowercase words longer than three letters,
+// dropping the common filler that would otherwise match almost anything.
+func significantWords(text string) []string {
+	drop := map[string]bool{
+		"the": true, "and": true, "for": true, "with": true, "that": true,
+		"this": true, "from": true, "your": true, "have": true, "make": true,
+		"build": true, "create": true, "want": true, "need": true, "please": true,
+		"یک": true, "برای": true, "بسازید": true, "کنید": true, "من": true,
+		"یا": true, "تا": true, "که": true, "را": true, "در": true, "با": true,
+		"است": true, "های": true, "هایی": true, "می": true, "شود": true,
+	}
+
+	fields := strings.FieldsFunc(text, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+
+	var out []string
+	seen := map[string]bool{}
+	for _, f := range fields {
+		w := strings.TrimSpace(f)
+		if len([]rune(w)) <= 3 || drop[w] || seen[w] {
+			continue
+		}
+		seen[w] = true
+		out = append(out, w)
 	}
 	return out
 }

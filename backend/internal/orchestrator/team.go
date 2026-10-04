@@ -162,14 +162,32 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 		if task != nil {
 			taskVerdict, err := verifier.Verify(ctx, sCtx)
 			if err != nil {
-				log.Printf("team verification error on task %s: %v", task.ID, err)
-			} else if taskVerdict != nil {
+				// The gate could not run. That is not proof the task is
+				// unfinished, but it is also not proof it is finished, so the
+				// task is treated as not done and the run continues. Ending the
+				// project over a credential problem would be the worst outcome.
+				log.Printf("team verification could not run for task %s: %v", task.ID, err)
+				taskVerdict = &agent.TaskVerdict{
+					TaskID:  task.ID,
+					Passed:  false,
+					Gaps:    []string{"verification could not be run: " + err.Error()},
+					Summary: "The verification gate could not run, so this task is not counted as done.",
+				}
+			}
+			if taskVerdict != nil {
 				sCtx.SetLastTaskVerdict(taskVerdict)
 				if taskVerdict.Passed {
 					sCtx.CompleteTask(touched)
 				} else {
 					sCtx.SendTaskBackToRework(taskVerdict.Summary)
 				}
+				o.persistPlan(sCtx, ws)
+				o.broadcast(SwarmEvent{
+					Type:      EventPlanUpdated,
+					ProjectID: projectID,
+					Round:     round,
+					Plan:      sCtx.PlanSnapshot(),
+				})
 				o.broadcast(SwarmEvent{
 					Type:    EventAgentOutput,
 					ProjectID: projectID,
@@ -355,9 +373,23 @@ func (o *Orchestrator) planForTeam(ctx context.Context, sCtx *agent.SwarmContext
 // explicit error rather than continuing with no list: an empty list would read
 // as a finished project, which is the exact failure this replaces.
 func (o *Orchestrator) ensureTeamPlan(ctx context.Context, sCtx *agent.SwarmContext, specs []domain.AgentSpec, ws *workspace.Workspace) error {
+	// Same rule as the built-in swarm: a stored plan is resumed only when it
+	// belongs to the request being made now. Resuming it blindly meant a team
+	// asked for something new kept building the previous request's work.
 	if plan, err := workspace.LoadPlan(ws.Path()); err == nil && plan != nil && len(plan.Tasks) > 0 {
-		sCtx.SetPlan(plan)
-		return nil
+		if planMatchesRequest(plan, sCtx.UserPrompt) {
+			sCtx.SetPlan(plan)
+			log.Printf("team run resumed existing plan: %d tasks, %d done", len(plan.Tasks), countDone(plan))
+			return nil
+		}
+		log.Printf("stored plan does not match this request; building a new one")
+		if brain, bErr := workspace.NewBrainFS(ws.Path()); bErr == nil {
+			if path, aErr := brain.ArchivePlan(plan, "a different request was made in this project"); aErr != nil {
+				log.Printf("could not archive the previous plan: %v", aErr)
+			} else {
+				log.Printf("previous plan archived to %s", path)
+			}
+		}
 	}
 
 	designer := pickPlanner(specs)
@@ -376,6 +408,13 @@ func (o *Orchestrator) ensureTeamPlan(ctx context.Context, sCtx *agent.SwarmCont
 
 	agent.LogPlanOutcome("team-designer", plan, nil)
 	sCtx.SetPlan(plan)
+	o.persistPlan(sCtx, ws)
+	o.broadcast(SwarmEvent{
+		Type:      EventPlanUpdated,
+		ProjectID: sCtx.ProjectID,
+		Round:     sCtx.Round,
+		Plan:      sCtx.PlanSnapshot(),
+	})
 	return nil
 }
 

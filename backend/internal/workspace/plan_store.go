@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/nexusai/nexusai/backend/internal/domain"
 )
@@ -62,6 +63,38 @@ func (b *BrainFS) WritePlan(plan *domain.ProjectPlan) error {
 		return fmt.Errorf("failed to commit %s: %w", FilePlan, err)
 	}
 	return nil
+}
+
+// ArchivePlan writes a plan to its own timestamped file and leaves plan.json
+// alone.
+//
+// It exists because replacing a plan used to destroy the old one within a single
+// round: the caller wrote the "superseded" plan to plan.json and then the new
+// plan overwrote it immediately, so nothing was actually kept. Archiving to a
+// separate name is what makes the claim true.
+func (b *BrainFS) ArchivePlan(plan *domain.ProjectPlan, reason string) (string, error) {
+	if plan == nil {
+		return "", fmt.Errorf("cannot archive a nil plan")
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	stamp := time.Now().UTC().Format("20060102-150405")
+	name := fmt.Sprintf("plan.%s.superseded.json", stamp)
+	body := map[string]interface{}{
+		"archived_at": time.Now().UTC().Format(time.RFC3339),
+		"reason":      reason,
+		"plan":        plan,
+	}
+	data, err := json.MarshalIndent(body, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to encode archived plan: %w", err)
+	}
+	path := filepath.Join(b.dir, name)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return "", fmt.Errorf("failed to write %s: %w", name, err)
+	}
+	return path, nil
 }
 
 // SavePlan is a convenience wrapper used by agents that hold their own lock.

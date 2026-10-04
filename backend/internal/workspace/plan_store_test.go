@@ -158,3 +158,52 @@ func TestPlanStore_ConvenienceWrappers(t *testing.T) {
 		t.Errorf("expected 'Unit Test', got %q", loaded.Tasks[0].Title)
 	}
 }
+
+// TestArchivePlanKeepsTheOldBoard proves archiving really preserves the previous
+// plan. Writing the superseded plan back to plan.json destroyed it within one
+// round, because the new plan is persisted to that same file immediately after.
+func TestArchivePlanKeepsTheOldBoard(t *testing.T) {
+	tmpDir := t.TempDir()
+	brain, err := NewBrainFS(tmpDir)
+	if err != nil {
+		t.Fatalf("NewBrainFS: %v", err)
+	}
+
+	old := &domain.ProjectPlan{
+		Goal: "Build the original thing",
+		Tasks: []domain.ProjectTask{
+			{ID: "T-001", Title: "old work", State: domain.TaskDone},
+		},
+	}
+	path, err := brain.ArchivePlan(old, "a different request was made")
+	if err != nil {
+		t.Fatalf("ArchivePlan: %v", err)
+	}
+	if path == "" {
+		t.Fatal("ArchivePlan returned no path")
+	}
+
+	// The archive is a distinct file, so the live plan is untouched by it.
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("archive file missing: %v", err)
+	}
+	live, err := brain.ReadPlan()
+	if err != nil {
+		t.Fatalf("ReadPlan: %v", err)
+	}
+	if live != nil {
+		t.Errorf("archiving must not touch the live plan, got %+v", live)
+	}
+
+	// And the content really is the old plan.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+	if !strings.Contains(string(data), "Build the original thing") {
+		t.Errorf("archive does not contain the old goal:\n%s", data)
+	}
+	if !strings.Contains(string(data), "a different request was made") {
+		t.Errorf("archive does not record why it was superseded:\n%s", data)
+	}
+}

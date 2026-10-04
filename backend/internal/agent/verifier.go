@@ -283,14 +283,37 @@ func renderFiles(files []domain.CodeFile) string {
 // returned an empty key for every agent, so every verification call went out
 // unauthenticated and failed, which the loop then reported as a fatal error.
 func (v *TaskVerifier) resolveModel(sCtx *SwarmContext) (model, apiKey, baseURL string, err error) {
+	// Any model the swarm is already using will do. The lookup used to prefer a
+	// fixed list of built-in roles, so a custom team made of roles the fixed
+	// roster knows nothing about had no model to verify with — and the run then
+	// ended with an error instead of doing any work.
 	var chosen string
 	if sCtx.AgentModels != nil {
-		// A reviewer is preferred because judging completion is a reasoning task.
+		// A reviewer is preferred when the team has one, because judging
+		// completion is a reasoning task.
 		for _, role := range []domain.AgentRole{domain.RoleCritic, domain.RoleSecurity, domain.RoleCoder, domain.RoleArchitect} {
 			if m := strings.TrimSpace(sCtx.AgentModels[role]); m != "" {
 				chosen = m
 				break
 			}
+		}
+		if chosen == "" {
+			// Fall back to whatever model the team does assign. Map order does
+			// not matter here: any working model can judge an acceptance
+			// condition, and refusing to run would be strictly worse.
+			for _, m := range sCtx.AgentModels {
+				if m = strings.TrimSpace(m); m != "" {
+					chosen = m
+					break
+				}
+			}
+		}
+	}
+	if chosen == "" {
+		if envM := os.Getenv("NEXUS_MODEL"); envM != "" {
+			chosen = envM
+		} else if envM := os.Getenv("OPENAI_MODEL"); envM != "" {
+			chosen = envM
 		}
 	}
 	if chosen == "" {
