@@ -10,10 +10,21 @@ class WebSocketClient {
   private statusHandlers: Set<StatusHandler> = new Set();
   private reconnectTimer: any = null;
   private isConnected: boolean = false;
+  private useProxy: boolean = false;
 
-  constructor(url: string = `ws://${window.location.hostname}:8080/ws`) {
-    this.url = url;
+  constructor(url?: string) {
+    this.url = url || '';
     (window as any).__wsClient = this;
+  }
+
+  private getUrl(): string {
+    if (this.url) return this.url;
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    if (this.useProxy) {
+      return `${proto}//${window.location.host}/ws`;
+    }
+    const host = window.location.hostname || '127.0.0.1';
+    return `${proto}//${host}:8080/ws`;
   }
 
   public connect() {
@@ -22,7 +33,8 @@ class WebSocketClient {
     }
 
     try {
-      this.socket = new WebSocket(this.url);
+      const targetUrl = this.getUrl();
+      this.socket = new WebSocket(targetUrl);
 
       this.socket.onopen = () => {
         this.isConnected = true;
@@ -45,6 +57,7 @@ class WebSocketClient {
       this.socket.onclose = () => {
         this.isConnected = false;
         this.notifyStatus(false);
+        this.useProxy = !this.useProxy;
         this.scheduleReconnect();
       };
 
@@ -52,6 +65,7 @@ class WebSocketClient {
         this.socket?.close();
       };
     } catch (e) {
+      this.useProxy = !this.useProxy;
       this.scheduleReconnect();
     }
   }
