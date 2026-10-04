@@ -62,6 +62,7 @@ IDE چند-ایجنتی که ایجنت‌های هوش مصنوعی با هم �
 | **ویجت زنده تسک‌بورد با نوار پیشرفت در فرانت‌اند (Composer Panel)** | کامل — Antigravity |
 | **Change Ledger تغییرناپذیر (`.project/ledger.jsonl` — بند ۳۰ سند ویژن)** | کامل — Antigravity |
 | **اندپوینت REST لجر تغییرات (`GET /api/projects/{id}/ledger`)** | کامل — Antigravity |
+| **اتصال زنده Change Ledger و تاریخچه کامیت‌ها به UI (سایدبار Source Control)** | کامل — Antigravity |
 | **تأییدیه تست‌ها (۱۲ پکیج Go ۱۰۰٪ سبز + بیلد فرانت‌اند تمیز)** | کامل — Antigravity |
 | **اتصال Plan-Driven Loop به Custom Teams (`RunTeam`)** | کامل — Claude & Antigravity |
 | **تزریق تسک فعال به کانتکست کدنویس‌ها و بازبین‌ها (`activeTaskBrief`)** | کامل — Claude & Antigravity |
@@ -76,13 +77,10 @@ IDE چند-ایجنتی که ایجنت‌های هوش مصنوعی با هم �
 ### ۲. مدیریت هزینه‌ها و تفکیک هزینه/توکن به‌ازای هر Agent (بند ۳۷ سند ویژن)
 ثبت و گزارش توکن‌های ورودی و خروجی مصرفی توسط هر ایجنت برای مشاهده‌ی هزینه و کارایی مدل‌ها.
 
-### ۳. نمایش بصری Change Ledger در رابط کاربری
-طراحی تب یا پنل History/Ledger در IDE برای مشاهده تغییرات ثبت‌شده در `.project/ledger.jsonl`.
-
 ---
 
 ## 🎯 کار بعدی
-همکاری با Claude: شروع Priority 1 (استریم لحظه‌ای توکن‌ها) یا تفکیک توکن/هزینه ایجنت‌ها با هماهنگی در `LIVE_BOARD.md` و رزرو در `IN_PROGRESS.md`.
+همکاری با Claude: شروع Priority 1 (استریم لحظه‌ای توکن‌ها) یا تفکیک توکن/هزینه ایجنت‌ها (بند ۳۷) با هماهنگی در `LIVE_BOARD.md` و رزرو در `IN_PROGRESS.md`.
 
 ---
 

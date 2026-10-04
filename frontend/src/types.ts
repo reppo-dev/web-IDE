@@ -89,6 +89,27 @@ export interface ProjectPlan {
   tasks: ProjectTask[];
 }
 
+export interface TestLedgerRecord {
+  ran?: string[];
+  result?: string;
+  duration?: string;
+}
+
+export interface ChangeLedgerEntry {
+  id?: string;
+  task_id?: string;
+  file?: string;
+  agent?: string;
+  commit?: string;
+  reason?: string;
+  decision_ref?: string;
+  constraints?: string[];
+  tests?: TestLedgerRecord;
+  timestamp: string;
+  event?: string;
+  details?: string;
+}
+
 export interface SwarmEvent {
   type: 'agent_thinking' | 'agent_output' | 'round_started' | 'round_complete' | 'consensus_reached' | 'code_updated' | 'error' | 'teams_data' | 'team_saved' | 'team_deleted' | 'run_started' | 'plan_updated';
   project_id: string;

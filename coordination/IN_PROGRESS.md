@@ -2,6 +2,15 @@
 
 > **قانون: اگر فایلی اینجا رزرو شده، دست به آن نمی‌زنید.**
 > اگر فایلی که می‌خواهید تغییر دهید اینجاست، منتظر بمانید یا فایل دیگری بردارید.
+### ✅ Antigravity — ۲۰۲۶-۱۰-۰۴ ۰۷:۴۲ (تمام شد)
+- `backend/internal/workspace/project_brain.go` — پشتیبانی ReadLedger از تمام ورودی‌های لجر (تغییر فایل و رویدادهای کامیت)
+- `frontend/src/types.ts` — تعریف ChangeLedgerEntry و TestLedgerRecord در تایپ‌های فرانت‌اند
+- `frontend/src/App.tsx` — ارسال projectId به کامپوننت Sidebar
+- `frontend/src/components/layout/Sidebar.tsx` — اتصال زنده نمایش Change Ledger (§30) و تاریخچه کامیت‌ها به API پروژه
+
+**نتیجه:** ویوی Source Control در سایدبار از حالت ماک استاتیک خارج شده و به Change Ledger زنده و تاریخچه کامیت‌های گیت متصل شد. تمام ۱۲ پکیج Go بک‌اند ۱۰۰٪ سبز، بیلد فرانت‌اند در ۲.۹ ثانیه موفق، دیمون nexusd روی پورت ۸۰۸۰ و سرور فرانت روی پورت ۳۰۰۰ لایو و در حال کارند. تمام فایل‌ها آزاد هستند.
+
+
 ### ✅ Antigravity — ۲۰۲۶-۱۰-۰۴ ۰۷:۲۸ (تمام شد)
 - `backend/internal/orchestrator/team.go` — اضافه کردن map مدل‌ها (AgentModels) به sCtx در RunTeam
 - `backend/internal/orchestrator/team_test.go` — تنظیم دقیق SetActiveTask در TestTeamFilesTouched

@@ -679,6 +679,7 @@ export const App: React.FC = () => {
           <Sidebar
             view={activeSidebarView}
             projectName={projectName}
+            projectId={projectId}
             files={files}
             activeFile={activeFile}
             onSelectFile={handleSelectFile}

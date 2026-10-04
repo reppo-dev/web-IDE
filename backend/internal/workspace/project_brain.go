@@ -47,16 +47,18 @@ type LedgerEntry struct {
 
 // ChangeLedgerEntry records a structured, immutable change record in ledger.jsonl (PROJECT_VISION §30).
 type ChangeLedgerEntry struct {
-	ID          string            `json:"id"`
+	ID          string            `json:"id,omitempty"`
 	TaskID      string            `json:"task_id,omitempty"`
-	File        string            `json:"file"`
-	Agent       string            `json:"agent"`
+	File        string            `json:"file,omitempty"`
+	Agent       string            `json:"agent,omitempty"`
 	Commit      string            `json:"commit,omitempty"`
-	Reason      string            `json:"reason"`
+	Reason      string            `json:"reason,omitempty"`
 	DecisionRef string            `json:"decision_ref,omitempty"`
 	Constraints []string          `json:"constraints,omitempty"`
 	Tests       *TestLedgerRecord `json:"tests,omitempty"`
 	Timestamp   string            `json:"timestamp"`
+	Event       string            `json:"event,omitempty"`
+	Details     string            `json:"details,omitempty"`
 }
 
 // TestLedgerRecord records test execution results associated with a change.
@@ -259,8 +261,10 @@ func (b *BrainFS) ReadLedger() ([]ChangeLedgerEntry, error) {
 			continue
 		}
 		var entry ChangeLedgerEntry
-		if err := json.Unmarshal([]byte(trimmed), &entry); err == nil && entry.File != "" {
-			entries = append(entries, entry)
+		if err := json.Unmarshal([]byte(trimmed), &entry); err == nil {
+			if entry.File != "" || entry.Commit != "" || entry.Event != "" || entry.Details != "" {
+				entries = append(entries, entry)
+			}
 		}
 	}
 	if entries == nil {

@@ -18,11 +18,12 @@ import {
 } from 'lucide-react';
 import { SidebarView } from './ActivityBar';
 import { ProjectTree } from '../ide/ProjectTree';
-import { CodeFile, MemoryEntry, SkillManifest, ArbiterVerdict } from '../../types';
+import { CodeFile, MemoryEntry, SkillManifest, ArbiterVerdict, ChangeLedgerEntry } from '../../types';
 
 interface SidebarProps {
   view: SidebarView;
   projectName: string | null;
+  projectId?: string | null;
   files: CodeFile[];
   activeFile: string;
   onSelectFile: (path: string) => void;
@@ -37,6 +38,7 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({
   view,
   projectName,
+  projectId,
   files,
   activeFile,
   onSelectFile,
@@ -48,6 +50,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
   verdict,
 }) => {
   const [memorySearch, setMemorySearch] = useState('');
+  const [ledgerEntries, setLedgerEntries] = useState<ChangeLedgerEntry[]>([]);
+  const [loadingLedger, setLoadingLedger] = useState<boolean>(false);
+  const [ledgerError, setLedgerError] = useState<string | null>(null);
+
+  const fetchLedger = React.useCallback(async () => {
+    if (!projectId) return;
+    setLoadingLedger(true);
+    setLedgerError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/ledger`);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setLedgerEntries(Array.isArray(data) ? data : []);
+    } catch (err: any) {
+      setLedgerError(err.message || 'خطا در دریافت لاگ تغییرات');
+    } finally {
+      setLoadingLedger(false);
+    }
+  }, [projectId]);
+
+  React.useEffect(() => {
+    if (view === 'git' && projectId) {
+      fetchLedger();
+    }
+  }, [view, projectId, fetchLedger]);
 
   if (!view) return null;
 
@@ -129,19 +158,116 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
-        {/* VIEW 3: GIT SOURCE CONTROL */}
+        {/* VIEW 3: GIT SOURCE CONTROL & CHANGE LEDGER */}
         {view === 'git' && (
           <div className="space-y-3">
-            <div className="text-[11px] text-zinc-500 font-semibold uppercase">Swarm Auto-Commit Log</div>
-            <div className="space-y-2 font-mono text-[11px]">
-              <div className="p-2 bg-zinc-900/80 rounded border border-zinc-800/80 space-y-1">
-                <div className="flex items-center gap-1.5 text-indigo-400 font-medium">
-                  <GitCommit size={13} />
-                  <span>Round 1 Consensus</span>
-                </div>
-                <div className="text-zinc-400 text-[10px]">Score: 91.5% | Passed threshold</div>
+            <div className="flex items-center justify-between pb-1.5 border-b border-[#242424]">
+              <div className="text-[11px] text-zinc-400 font-semibold uppercase flex items-center gap-1.5">
+                <GitCommit size={14} className="text-indigo-400" />
+                <span>Change Ledger (§30)</span>
               </div>
+              <button
+                onClick={fetchLedger}
+                disabled={loadingLedger || !projectId}
+                className="p-1 hover:text-zinc-200 hover:bg-zinc-800 rounded text-zinc-400 transition-colors disabled:opacity-40"
+                title="بروزرسانی لاگ تغییرات (Refresh)"
+              >
+                <RefreshCw size={12} className={loadingLedger ? 'animate-spin' : ''} />
+              </button>
             </div>
+
+            {!projectId ? (
+              <div className="p-4 text-center text-zinc-500 text-xs">
+                برای مشاهده تاریخچه کامیت‌ها و لجر، ابتدا پروژه‌ای باز کنید.
+              </div>
+            ) : loadingLedger && ledgerEntries.length === 0 ? (
+              <div className="p-4 text-center text-zinc-500 text-xs flex items-center justify-center gap-2">
+                <RefreshCw size={13} className="animate-spin text-indigo-400" />
+                <span>در حال دریافت لاگ تغییرات...</span>
+              </div>
+            ) : ledgerError ? (
+              <div className="p-3 bg-red-950/40 border border-red-900/50 rounded text-red-300 text-[11px]">
+                {ledgerError}
+              </div>
+            ) : ledgerEntries.length === 0 ? (
+              <div className="p-4 text-center text-zinc-500 text-xs">
+                هنوز تغییری در این پروژه ثبت نشده است.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {ledgerEntries.slice().reverse().map((entry, idx) => {
+                  const shortCommit = entry.commit ? entry.commit.slice(0, 7) : null;
+                  const timeFormatted = entry.timestamp
+                    ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                    : '';
+
+                  return (
+                    <div
+                      key={entry.id || `${entry.commit}-${idx}`}
+                      className="p-2 bg-zinc-900/80 hover:bg-zinc-900 rounded border border-zinc-800/80 transition-colors space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between text-[10px]">
+                        <div className="flex items-center gap-1.5 font-mono">
+                          <GitCommit size={12} className="text-indigo-400 shrink-0" />
+                          {shortCommit ? (
+                            <span className="text-indigo-300 font-semibold">{shortCommit}</span>
+                          ) : (
+                            <span className="text-zinc-400">Entry</span>
+                          )}
+                        </div>
+                        {timeFormatted && (
+                          <span className="text-zinc-500 font-mono text-[9px]">{timeFormatted}</span>
+                        )}
+                      </div>
+
+                      {/* Badges: Task ID + Agent + Test Status */}
+                      <div className="flex flex-wrap items-center gap-1">
+                        {entry.task_id && (
+                          <span className="px-1.5 py-0.5 rounded bg-blue-950/60 text-blue-300 border border-blue-800/40 text-[9px] font-mono">
+                            {entry.task_id}
+                          </span>
+                        )}
+                        {entry.agent && (
+                          <span className="px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-800/40 text-[9px]">
+                            {entry.agent}
+                          </span>
+                        )}
+                        {entry.tests?.result && (
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-mono border ${
+                              entry.tests.result === 'PASSED'
+                                ? 'bg-emerald-950/60 text-emerald-400 border-emerald-800/40'
+                                : 'bg-red-950/60 text-red-400 border-red-800/40'
+                            }`}
+                          >
+                            {entry.tests.result}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* File Link */}
+                      {entry.file && (
+                        <button
+                          onClick={() => onSelectFile(entry.file!)}
+                          className="flex items-center gap-1.5 text-[11px] text-zinc-300 hover:text-indigo-300 transition-colors text-left font-mono truncate w-full"
+                          title={`باز کردن ${entry.file}`}
+                        >
+                          <FileCode size={12} className="text-zinc-500 shrink-0" />
+                          <span className="truncate">{entry.file}</span>
+                        </button>
+                      )}
+
+                      {/* Reason or Details */}
+                      {(entry.reason || entry.details) && (
+                        <p className="text-[10px] text-zinc-400 leading-relaxed break-words">
+                          {entry.reason || entry.details}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
