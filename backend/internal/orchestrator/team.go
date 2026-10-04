@@ -80,17 +80,34 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 		mode = o.config.Mode
 	}
 
-	rounds := t.MaxRounds
-	if rounds <= 0 {
-		rounds = 3
-	}
 	threshold := t.ConsensusThreshold
 	if threshold <= 0 {
 		threshold = 85
 	}
 
+	// A team run used to stop after a fixed number of rounds and call the
+	// project done whenever the score cleared the threshold. That is the same
+	// defect the built-in swarm had: a clean partial project scored well and the
+	// run ended. A team now gets the same treatment — one task per round, and
+	// completion decided by the plan rather than by the score.
+	watcher := newProgressWatcher(3)
+	verifier := agent.NewTaskVerifier(o.llmClient())
+	if o.sandbox != nil {
+		verifier.SetTestRunner(o.sandbox.RunTests)
+	}
+
+	// Round ceiling: MaxRounds stays meaningful for a custom team, but it is
+	// now a safety limit rather than the definition of "done". A team that
+	// finishes its plan early exits before reaching it.
+	rounds := t.MaxRounds
+	if rounds <= 0 {
+		rounds = teamDefaultRoundLimit
+	}
+
 	for round := 1; round <= rounds; round++ {
 		sCtx.Round = round
+		sCtx.ClearVerificationIssues()
+
 		// Do not blank CodeFiles between rounds: the reviewers and the judge in
 		// the next round must still see what the previous round produced, and
 		// the context engine re-reads the files from disk anyway.
@@ -99,6 +116,17 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 			ProjectID: projectID,
 			Round:     round,
 		})
+
+		// Pick this round's task. The plan is built once, by the team's
+		// designer, on the first round.
+		if sCtx.Plan == nil {
+			if err := o.ensureTeamPlan(ctx, sCtx, specs, ws); err != nil {
+				return nil, err
+			}
+		}
+		task := sCtx.NextTask()
+
+		filesBefore := sCtx.CodeFilesSnapshot()
 
 		if err := o.runTeamPhases(ctx, sCtx, projectID, specs, ws); err != nil {
 			return nil, err
@@ -119,11 +147,41 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 			o.runRepairPass(ctx, sCtx, projectID, specs, ws)
 		}
 
+		// Record what this round produced, so the gate below knows which files
+		// the task was supposed to deliver.
+		touched := teamFilesTouched(sCtx, filesBefore, sCtx.CodeFilesSnapshot())
+		sCtx.SetActiveTaskFiles(touched)
+
+		// Verify the task against the real code before anyone scores it.
+		if task != nil {
+			taskVerdict, err := verifier.Verify(ctx, sCtx)
+			if err != nil {
+				log.Printf("team verification error on task %s: %v", task.ID, err)
+			} else if taskVerdict != nil {
+				sCtx.SetLastTaskVerdict(taskVerdict)
+				if taskVerdict.Passed {
+					sCtx.CompleteTask(touched)
+				} else {
+					sCtx.SendTaskBackToRework()
+				}
+				o.broadcast(SwarmEvent{
+					Type:    EventAgentOutput,
+					ProjectID: projectID,
+					Round:   round,
+					Agent:   domain.RoleCritic,
+					Payload: fmt.Sprintf("تسک %s: %s", task.ID, taskVerdict.Summary),
+				})
+			}
+		}
+
 		score, verdict := o.scoreTeam(ctx, sCtx, specs, round, threshold)
 		sCtx.ArbiterVerdict = verdict
+		applyPlanToTeamVerdict(verdict, sCtx, round, score, threshold)
 
-		if _, err := ws.CommitRound(ctx, round, score, verdict.Summary); err != nil {
-			log.Printf("team run: git commit failed: %v", err)
+		commitHash, _ := ws.CommitRound(ctx, round, score, verdict.Summary)
+		o.persistPlan(sCtx, ws)
+		if task != nil {
+			o.persistChangeLedger(task, touched, commitHash, sCtx.LastTaskVerdict, ws)
 		}
 
 		o.broadcast(SwarmEvent{
@@ -132,6 +190,19 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 			Round:     round,
 			Verdict:   verdict,
 		})
+
+		// Every task verified, so the project is genuinely finished.
+		if sCtx.AllTasksDone() {
+			o.broadcast(SwarmEvent{
+				Type:      EventConsensusReached,
+				ProjectID: projectID,
+				Round:     round,
+				Verdict:   verdict,
+				Files:     sCtx.CodeFiles,
+				Payload:   "همه‌ی تسک‌ها اعتبارسنجی شدند.",
+			})
+			return sCtx, nil
+		}
 
 		if verdict.Passed {
 			o.broadcast(SwarmEvent{
@@ -143,9 +214,141 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 			})
 			return sCtx, nil
 		}
+
+		// Stop when repeating cannot help: three identical rounds in a row.
+		if watcher.record(sCtx) {
+			msg := describeStall(task, 3)
+			log.Printf("team run stalled: %s", msg)
+			if task != nil {
+				sCtx.BlockTask(task.ID)
+			}
+			o.persistPlan(sCtx, ws)
+			o.broadcast(SwarmEvent{
+				Type:      EventPlanUpdated,
+				ProjectID: projectID,
+				Round:     round,
+				Plan:      sCtx.PlanSnapshot(),
+				Payload:   msg,
+			})
+			return sCtx, nil
+		}
 	}
 
 	return sCtx, nil
+}
+
+// teamDefaultRoundLimit bounds a custom team run that declares no limit of its
+// own. It is a safety valve, not a definition of done: a team whose plan is
+// larger than this keeps its unfinished state on disk and continues next run.
+const teamDefaultRoundLimit = 40
+
+// applyPlanToTeamVerdict re-decides a team's verdict against its plan.
+//
+// scoreTeam judges code quality, and a clean partial project scores well. The
+// plan decides whether anything is actually finished, so a team run may not
+// report success while open tasks remain.
+func applyPlanToTeamVerdict(verdict *domain.ArbiterVerdict, sCtx *agent.SwarmContext, round int, score float64, threshold float64) {
+	if verdict == nil {
+		return
+	}
+	_, open, hasPlan := sCtx.PlanProgress()
+	if hasPlan && open > 0 {
+		verdict.Passed = false
+		verdict.NeedsRefinement = false
+		percent := 0.0
+		if p := sCtx.PlanSnapshot(); p != nil {
+			_, _, percent = p.Progress()
+		}
+		verdict.Summary = fmt.Sprintf(
+			"دور %d با امتیاز %.1f%% تمیز است، اما %d تسک هنوز باز است (%.0f%% کامل). ادامه می‌دهیم.",
+			round, score, open, percent)
+		verdict.FeedbackToCoder = "به تسک بعدی بروید؛ پروژه هنوز تمام نشده است."
+	}
+}
+
+// teamFilesTouched lists the files one team round actually produced.
+//
+// The file set is cumulative, so the round's real output is the diff against
+// what existed before the round ran. Returning everything would hand the fifth
+// task every file the project had produced so far, and the gate would check
+// files the task never claimed.
+func teamFilesTouched(sCtx *agent.SwarmContext, before, after []domain.CodeFile) []string {
+	prior := make(map[string]string, len(before))
+	for _, f := range before {
+		prior[f.Path] = f.Content
+	}
+
+	active := sCtx.ActiveTaskSnapshot()
+	if active != nil && len(active.Files) > 0 {
+		return active.Files
+	}
+
+	var out []string
+	for _, f := range after {
+		if prev, existed := prior[f.Path]; !existed || prev != f.Content {
+			out = append(out, f.Path)
+		}
+	}
+	return out
+}
+
+// pickPlanner chooses which team member writes the work list.
+//
+// A team's designer is the right author: it already reasons about the whole
+// project, and it is the member whose phase runs first. When no member is marked
+// as a designer, the first agent in the list is used rather than failing the
+// run, because most teams are built without thinking about this field.
+func pickPlanner(specs []domain.AgentSpec) *domain.AgentSpec {
+	for i := range specs {
+		if specs[i].Phase == domain.PhaseDesign || specs[i].Role == domain.RoleArchitect {
+			return &specs[i]
+		}
+	}
+	if len(specs) > 0 {
+		return &specs[0]
+	}
+	return nil
+}
+
+// planForTeam asks a designer for the work list and validates it.
+func (o *Orchestrator) planForTeam(ctx context.Context, sCtx *agent.SwarmContext, spec domain.AgentSpec) (*domain.ProjectPlan, error) {
+	client := o.llmClient()
+	if client == nil {
+		return nil, fmt.Errorf("no LLM client is configured, so the team cannot produce a work list")
+	}
+
+	designer := agent.NewCustomAgent(spec, client)
+	return designer.BuildPlan(ctx, sCtx)
+}
+
+// ensureTeamPlan gives the team a work list on its first round.
+//
+// The team's designer produces the plan. If it cannot, the run stops with an
+// explicit error rather than continuing with no list: an empty list would read
+// as a finished project, which is the exact failure this replaces.
+func (o *Orchestrator) ensureTeamPlan(ctx context.Context, sCtx *agent.SwarmContext, specs []domain.AgentSpec, ws *workspace.Workspace) error {
+	if plan, err := workspace.LoadPlan(ws.Path()); err == nil && plan != nil && len(plan.Tasks) > 0 {
+		sCtx.SetPlan(plan)
+		return nil
+	}
+
+	designer := pickPlanner(specs)
+	if designer == nil {
+		return fmt.Errorf("this team has no designer agent, so no work list can be built; " +
+			"without a plan there is no way to know what remains")
+	}
+
+	plan, err := o.planForTeam(ctx, sCtx, *designer)
+	if err != nil {
+		return fmt.Errorf("team planning failed: %w", err)
+	}
+	if plan == nil || len(plan.Tasks) == 0 {
+		return fmt.Errorf("the team's designer returned no tasks, so the project cannot be tracked")
+	}
+
+	agent.LogPlanOutcome("team-designer", plan, nil)
+	sCtx.SetPlan(plan)
+	return nil
 }
 
 // stopIfConversational triages the user's message before any code work starts.

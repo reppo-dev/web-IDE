@@ -11,26 +11,15 @@ import (
 	"github.com/nexusai/nexusai/backend/internal/llm"
 )
 
-// BuildPlan asks the architect for the project's full work list.
+// planSystemPrompt is the decomposition contract shared by the built-in
+// architect and any team's designer agent.
 //
-// This runs once per project, before the first round, because the round loop
-// needs a backlog to advance: without it the swarm re-does whatever it just
-// finished and stops as soon as one round looks clean.
-//
-// The prompt is deliberately explicit about the failure this replaces. Asking a
-// model for "a plan" gets back the file list for the feature in front of it.
-// Asking for "every piece of work that must exist before a user could call the
-// project finished, including tests, wiring, and docs" gets a plan that can
-// actually end.
-func (a *ArchitectAgent) BuildPlan(ctx context.Context, sCtx *SwarmContext) (*domain.ProjectPlan, error) {
-	model := a.getModelForRole(sCtx)
-	apiKey, baseURL, err := a.getAPIKey(model, sCtx)
-	if err != nil {
-		return nil, err
-	}
-	cleanModel := a.cleanModelName(model)
-
-	systemPrompt := `You are the Project Planner in NexusAI, an autonomous engineering team.
+// It lives at package level because two very different agents need the same
+// rules: the fixed architect, and whichever agent a user made the designer of
+// their custom team. Both were otherwise free to answer "make an app" with a
+// file list for the part in front of them, which is the failure the whole
+// plan-driven loop exists to prevent.
+const planSystemPrompt = `You are the Project Planner in NexusAI, an autonomous engineering team.
 
 Your job is to produce the COMPLETE WORK LIST for a project request, not a summary of it.
 
@@ -64,6 +53,27 @@ Return ONLY valid JSON:
   ]
 }`
 
+// BuildPlan asks the architect for the project's full work list.
+//
+// This runs once per project, before the first round, because the round loop
+// needs a backlog to advance: without it the swarm re-does whatever it just
+// finished and stops as soon as one round looks clean.
+//
+// The prompt is deliberately explicit about the failure this replaces. Asking a
+// model for "a plan" gets back the file list for the feature in front of it.
+// Asking for "every piece of work that must exist before a user could call the
+// project finished, including tests, wiring, and docs" gets a plan that can
+// actually end.
+func (a *ArchitectAgent) BuildPlan(ctx context.Context, sCtx *SwarmContext) (*domain.ProjectPlan, error) {
+	model := a.getModelForRole(sCtx)
+	apiKey, baseURL, err := a.getAPIKey(model, sCtx)
+	if err != nil {
+		return nil, err
+	}
+	cleanModel := a.cleanModelName(model)
+
+	systemPrompt := planSystemPrompt
+
 	userPrompt := fmt.Sprintf("Project request: %s", sCtx.UserPrompt)
 	if sCtx.Blueprint != nil {
 		if bp, err := json.Marshal(sCtx.Blueprint); err == nil {
@@ -88,8 +98,8 @@ Return ONLY valid JSON:
 		return nil, fmt.Errorf("planner returned an invalid work list: %w (content: %s)", err, resp.Content)
 	}
 
-	plan = normalizePlan(plan)
-	if err := validatePlan(plan); err != nil {
+	plan = NormalizePlan(plan)
+	if err := ValidatePlan(plan); err != nil {
 		return nil, err
 	}
 
@@ -107,10 +117,10 @@ Return ONLY valid JSON:
 	return &plan, nil
 }
 
-// normalizePlan repairs the plan the model returned so the loop can rely on its
+// NormalizePlan repairs the plan the model returned so the loop can rely on its
 // invariants. Models routinely hand back an empty title, a duplicated id, or a
 // placeholder task; all three would otherwise break task selection.
-func normalizePlan(plan domain.ProjectPlan) domain.ProjectPlan {
+func NormalizePlan(plan domain.ProjectPlan) domain.ProjectPlan {
 	plan.Goal = strings.TrimSpace(plan.Goal)
 
 	out := make([]domain.ProjectTask, 0, len(plan.Tasks))
@@ -142,11 +152,11 @@ func normalizePlan(plan domain.ProjectPlan) domain.ProjectPlan {
 	return plan
 }
 
-// validatePlan rejects a work list the loop cannot act on.
+// ValidatePlan rejects a work list the loop cannot act on.
 //
 // An empty plan is the important case: it would make "no open tasks" true, and
 // the arbiter would read that as a finished project on the very first round.
-func validatePlan(plan domain.ProjectPlan) error {
+func ValidatePlan(plan domain.ProjectPlan) error {
 	if len(plan.Tasks) == 0 {
 		return fmt.Errorf("planner returned no tasks; the project cannot be tracked without a work list")
 	}

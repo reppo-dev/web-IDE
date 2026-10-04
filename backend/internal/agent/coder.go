@@ -68,6 +68,25 @@ Your role:
 	}
 
 	userPrompt := fmt.Sprintf("Goal: %s\n%s", sCtx.UserPrompt, memories)
+
+	// The active task is what this round is for. Without it the coder only ever
+	// sees the original goal, so every round produces the same slice of work and
+	// a multi-task project never advances past its first task.
+	if task := sCtx.ActiveTaskSnapshot(); task != nil {
+		userPrompt += fmt.Sprintf("\n\nTASK: %s\nTASK TITLE: %s", task.ID, task.Title)
+		if task.Acceptance != "" {
+			userPrompt += fmt.Sprintf("\nDONE WHEN: %s", task.Acceptance)
+		}
+		if len(task.Files) > 0 {
+			userPrompt += fmt.Sprintf("\nEXPECTED FILES: %s", strings.Join(task.Files, ", "))
+		}
+		// Naming what is already finished keeps the coder from redoing it.
+		if done := completedTitles(sCtx); len(done) > 0 {
+			userPrompt += fmt.Sprintf("\nALREADY COMPLETED (do not redo): %s", strings.Join(done, "; "))
+		}
+		userPrompt += "\nWork ONLY on this task. Do not start work that belongs to another task."
+	}
+
 	if projectCode != "" {
 		userPrompt += "\n\nEXISTING PROJECT CODE (ground truth):\n" + projectCode
 	}
@@ -150,3 +169,58 @@ Your role:
 	return c.createMessageWithReasoning(sCtx, domain.MsgCodeDraft, parsed, summary, reason)
 }
 
+
+// completedTitles lists the tasks already verified done.
+//
+// Showing them to the coder is what stops a later round from re-implementing
+// work that was accepted earlier: the model cannot see the plan's state on its
+// own, only what the prompt tells it.
+func completedTitles(sCtx *SwarmContext) []string {
+	plan := sCtx.PlanSnapshot()
+	if plan == nil {
+		return nil
+	}
+	var out []string
+	for _, t := range plan.Tasks {
+		if t.State == domain.TaskDone {
+			out = append(out, t.ID+" "+t.Title)
+		}
+	}
+	return out
+}
+
+// activeTaskBrief describes the round's task and the project's remaining work.
+//
+// Review agents previously saw only the original goal, so they judged the whole
+// project on every round and reported problems belonging to tasks that had not
+// started yet. Telling them the active task and what is already finished keeps
+// the review about the work this round actually did.
+func activeTaskBrief(sCtx *SwarmContext) string {
+	task := sCtx.ActiveTaskSnapshot()
+	if task == nil {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n\nCURRENT TASK: %s (%s)", task.ID, task.Title)
+	if task.Acceptance != "" {
+		fmt.Fprintf(&b, "\nIts condition for being done: %s", task.Acceptance)
+	}
+	if done := completedTitles(sCtx); len(done) > 0 {
+		fmt.Fprintf(&b, "\nAlready completed, do not report as missing: %s", strings.Join(done, "; "))
+	}
+	if plan := sCtx.PlanSnapshot(); plan != nil {
+		if open := plan.OpenTasks(); len(open) > 0 {
+			var titles []string
+			for _, t := range open {
+				if t.ID != task.ID {
+					titles = append(titles, t.Title)
+				}
+			}
+			if len(titles) > 0 {
+				fmt.Fprintf(&b, "\nStill not started, do not report as missing: %s", strings.Join(titles, "; "))
+			}
+		}
+	}
+	b.WriteString("\nReview only what belongs to the current task.")
+	return b.String()
+}

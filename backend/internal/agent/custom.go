@@ -474,6 +474,60 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
+// BuildPlan asks a team's designer for the project's complete work list.
+//
+// It reuses the built-in planner prompt rather than the agent's own, because the
+// failure this replaces was not about wording: a team was asked to do a project
+// and nobody ever asked it what the project required. The designer's own system
+// prompt describes how it reviews or designs; the decomposition rules are what
+// the round loop needs.
+//
+// A team's designer is a CustomAgent, so without this the team path had no way
+// to produce a plan at all and silently ran without one.
+func (c *CustomAgent) BuildPlan(ctx context.Context, sCtx *SwarmContext) (*domain.ProjectPlan, error) {
+	model := c.getModelForRole(sCtx)
+	if model == "" {
+		return nil, fmt.Errorf("designer %q has no model assigned, so no work list can be built", c.spec.Name)
+	}
+	apiKey, baseURL, err := c.getAPIKey(model, sCtx)
+	if err != nil {
+		return nil, err
+	}
+
+	designerBrief := ""
+	if c.spec.SystemPrompt != "" {
+		designerBrief = "\n\nThe designer's own brief, which the work list must respect:\n" + c.spec.SystemPrompt
+	}
+
+	userPrompt := fmt.Sprintf("Project request: %s%s", sCtx.UserPrompt, designerBrief)
+	if sCtx.Blueprint != nil && len(sCtx.Blueprint.FileTree) > 0 {
+		userPrompt += "\n\nFiles already planned:\n" + strings.Join(sCtx.Blueprint.FileTree, "\n")
+	}
+
+	resp, err := c.llmClient.Generate(ctx, llm.Request{
+		Model:        c.cleanModelName(model),
+		APIKey:       apiKey,
+		BaseURL:      baseURL,
+		SystemPrompt: planSystemPrompt,
+		UserPrompt:   userPrompt,
+		JSONSchema:   map[string]interface{}{"type": "object"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("team planning failed: %w", err)
+	}
+
+	var plan domain.ProjectPlan
+	if err := json.Unmarshal([]byte(CleanJSON(resp.Content)), &plan); err != nil {
+		return nil, fmt.Errorf("designer returned an invalid work list: %w (content: %s)", err, resp.Content)
+	}
+
+	plan = NormalizePlan(plan)
+	if err := ValidatePlan(plan); err != nil {
+		return nil, err
+	}
+	return &plan, nil
+}
+
 // buildWork assembles the context an agent sees: the shared project brain, the
 // real code on disk, and whatever the earlier agents produced this round.
 func (c *CustomAgent) buildWork(ctx context.Context, sCtx *SwarmContext) string {
@@ -481,6 +535,27 @@ func (c *CustomAgent) buildWork(ctx context.Context, sCtx *SwarmContext) string 
 
 	if sCtx.UserPrompt != "" {
 		b.WriteString(fmt.Sprintf("User Request: %s\n", sCtx.UserPrompt))
+	}
+
+	if c.spec.Phase == domain.PhaseImplement || c.spec.Role == domain.RoleCoder {
+		if task := sCtx.ActiveTaskSnapshot(); task != nil {
+			b.WriteString(fmt.Sprintf("\nCURRENT TASK: %s (%s)", task.ID, task.Title))
+			if task.Acceptance != "" {
+				b.WriteString(fmt.Sprintf("\nDONE WHEN: %s", task.Acceptance))
+			}
+			if len(task.Files) > 0 {
+				b.WriteString(fmt.Sprintf("\nEXPECTED FILES: %s", strings.Join(task.Files, ", ")))
+			}
+			if done := completedTitles(sCtx); len(done) > 0 {
+				b.WriteString(fmt.Sprintf("\nALREADY COMPLETED (do not redo): %s", strings.Join(done, "; ")))
+			}
+			b.WriteString("\nWork ONLY on this task. Do not start work that belongs to another task.\n")
+		}
+	} else {
+		if brief := activeTaskBrief(sCtx); brief != "" {
+			b.WriteString(brief)
+			b.WriteString("\n")
+		}
 	}
 
 	if brain := c.fetchMemories(ctx, sCtx); brain != "" {

@@ -48,6 +48,7 @@ Your role:
 	}
 
 	userPrompt := fmt.Sprintf("Audit Codebase for Security Vulnerabilities:\n%s\nCode:\n%s", memories, codeContent)
+	userPrompt += activeTaskBrief(sCtx)
 
 	model := sec.getModelForRole(sCtx)
 	apiKey, baseURL, err := sec.getAPIKey(model, sCtx)

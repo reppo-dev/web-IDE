@@ -181,3 +181,108 @@ func (m *intentLLM) Generate(ctx context.Context, req llm.Request) (*llm.Respons
 	}
 	return &llm.Response{Content: `{"kind":"` + string(m.kind) + `","reply":"سلام!","reason":"greeting"}`}, nil
 }
+
+func TestPickPlanner(t *testing.T) {
+	if pickPlanner(nil) != nil {
+		t.Error("expected nil for empty specs")
+	}
+
+	specs := []domain.AgentSpec{
+		{ID: "coder", Role: domain.RoleCoder, Phase: domain.PhaseImplement},
+		{ID: "designer", Role: domain.RoleCustom, Phase: domain.PhaseDesign},
+	}
+	got := pickPlanner(specs)
+	if got == nil || got.ID != "designer" {
+		t.Fatalf("expected designer agent by PhaseDesign, got %+v", got)
+	}
+
+	specsArchitect := []domain.AgentSpec{
+		{ID: "coder", Role: domain.RoleCoder, Phase: domain.PhaseImplement},
+		{ID: "arch", Role: domain.RoleArchitect, Phase: domain.PhaseImplement},
+	}
+	gotArch := pickPlanner(specsArchitect)
+	if gotArch == nil || gotArch.ID != "arch" {
+		t.Fatalf("expected designer agent by RoleArchitect, got %+v", gotArch)
+	}
+
+	specsFallback := []domain.AgentSpec{
+		{ID: "first", Role: domain.RoleCoder, Phase: domain.PhaseImplement},
+		{ID: "second", Role: domain.RoleCritic, Phase: domain.PhaseReview},
+	}
+	gotFallback := pickPlanner(specsFallback)
+	if gotFallback == nil || gotFallback.ID != "first" {
+		t.Fatalf("expected fallback to first agent, got %+v", gotFallback)
+	}
+}
+
+func TestTeamFilesTouched(t *testing.T) {
+	sCtx := &agent.SwarmContext{}
+
+	before := []domain.CodeFile{
+		{Path: "main.go", Content: "package main"},
+		{Path: "old.go", Content: "package old"},
+	}
+	after := []domain.CodeFile{
+		{Path: "main.go", Content: "package main\nfunc main() {}"},
+		{Path: "old.go", Content: "package old"},
+		{Path: "new.go", Content: "package new"},
+	}
+
+	touched := teamFilesTouched(sCtx, before, after)
+	if len(touched) != 2 {
+		t.Fatalf("expected 2 touched files, got %d: %v", len(touched), touched)
+	}
+
+	// When active task explicitly declares files
+	sCtx.SetPlan(&domain.ProjectPlan{
+		Tasks: []domain.ProjectTask{
+			{ID: "T-001", Title: "Make Feature", State: domain.TaskInProgress, Files: []string{"explicit.go"}},
+		},
+	})
+	touchedWithActive := teamFilesTouched(sCtx, before, after)
+	if len(touchedWithActive) != 1 || touchedWithActive[0] != "explicit.go" {
+		t.Errorf("expected explicit task files, got %v", touchedWithActive)
+	}
+}
+
+func TestApplyPlanToTeamVerdict(t *testing.T) {
+	sCtx := &agent.SwarmContext{}
+	sCtx.SetPlan(&domain.ProjectPlan{
+		Goal: "Complete App",
+		Tasks: []domain.ProjectTask{
+			{ID: "T-001", Title: "Task 1", State: domain.TaskDone},
+			{ID: "T-002", Title: "Task 2", State: domain.TaskTodo},
+		},
+	})
+
+	verdict := &domain.ArbiterVerdict{
+		Passed:  true,
+		Summary: "Code looks good",
+	}
+
+	applyPlanToTeamVerdict(verdict, sCtx, 1, 95.0, 85.0)
+
+	if verdict.Passed {
+		t.Error("verdict must NOT pass while open tasks remain in the plan")
+	}
+	if verdict.NeedsRefinement {
+		t.Error("verdict should not request full refinement, but continue to next task")
+	}
+	if verdict.FeedbackToCoder == "" {
+		t.Error("expected feedback directing to next task")
+	}
+
+	// When all tasks are done
+	sCtx.SetPlan(&domain.ProjectPlan{
+		Goal: "Complete App",
+		Tasks: []domain.ProjectTask{
+			{ID: "T-001", Title: "Task 1", State: domain.TaskDone},
+			{ID: "T-002", Title: "Task 2", State: domain.TaskDone},
+		},
+	})
+	verdictAllDone := &domain.ArbiterVerdict{Passed: true, Summary: "All done"}
+	applyPlanToTeamVerdict(verdictAllDone, sCtx, 2, 95.0, 85.0)
+	if !verdictAllDone.Passed {
+		t.Error("verdict must remain passed when all tasks are complete")
+	}
+}

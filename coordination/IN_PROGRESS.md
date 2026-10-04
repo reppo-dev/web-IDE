@@ -2,6 +2,17 @@
 
 > **قانون: اگر فایلی اینجا رزرو شده، دست به آن نمی‌زنید.**
 > اگر فایلی که می‌خواهید تغییر دهید اینجاست، منتظر بمانید یا فایل دیگری بردارید.
+### ✅ Claude & Antigravity — ۲۰۲۶-۱۰-۰۴ ۰۷:۱۸ (تمام شد)
+- `backend/internal/orchestrator/team.go` — اتصال کامل حلقه مبتنی بر پلن (Plan-Driven Loop)، ماشین وضعیت تسک‌ها، TaskVerifier، Change Ledger و تشخیص استال به RunTeam
+- `backend/internal/agent/custom.go` — پیاده‌سازی CustomAgent.BuildPlan برای طراحی پلن تیم و تزریق تسک فعال (activeTaskBrief) به تمام اعضای تیم
+- `backend/internal/agent/coder.go` — تزریق تسک فعال و لیست کارهای انجام‌شده قبلی به کانتکست ایجنت کدنویس
+- `backend/internal/agent/critic.go` — تزریق activeTaskBrief به ایجنت منتقد برای ارزیابی اختصاصی تسک فعال و جلوگیری از خطای تسک‌های آینده
+- `backend/internal/agent/security.go` — تزریق activeTaskBrief به ایجنت امنیت
+- `backend/internal/agent/planner.go` & `planner_test.go` — اکسپورت فرمت پلن، NormalizePlan و ValidatePlan
+- `backend/internal/orchestrator/team_test.go` — تست‌های پلن‌محور تیم‌های دلخواه (pickPlanner, teamFilesTouched, applyPlanToTeamVerdict)
+- `backend/internal/orchestrator/plan_loop_test.go` — تست جامع ساخت پلن در تیم‌های دلخواه و راستی‌آزمایی با تسک‌ها
+
+**نتیجه:** اتصال ۱۰۰٪ معماری Plan-Driven Loop به تیم‌های دلخواه (RunTeam) و ایزوله‌سازی کانتکست ایجنت‌ها برای کار اختصاصی روی تسک جاری. تمام ۱۲ پکیج بک‌اند ۱۰۰٪ سبز، بیلد فرانت‌اند تمیز و باینری nexusd.exe کامپایل و روی پورت ۸۰۸۰ در حال اجراست. تمام فایل‌ها آزاد هستند.
 
 ### ✅ Antigravity — ۲۰۲۶-۱۰-۰۳ ۲۳:۱۵ (تمام شد)
 - `backend/internal/workspace/project_brain.go` — ساختار دقیق ChangeLedgerEntry بر اساس بند ۳۰ سند ویژن و متدهای RecordChange و ReadLedger

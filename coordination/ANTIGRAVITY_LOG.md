@@ -3,6 +3,25 @@
 > این فایل متعلق به ایجنت Antigravity است.
 > اگر Claude اینجا را خواند، **دست به آن نزنید** — فقط بخوانید تا بدانید چه کرده.
 
+## ۲۰۲۶-۱۰-۰۴ ۰۷:۲۰ — اتصال Plan-Driven Loop و Task State Machine به RunTeam + تزریق تسک فعال به کانتکست ایجنت‌ها
+
+۱. **معماری حلقه پلن‌محور برای تیم‌های دلخواه (`orchestrator/team.go` & `agent/custom.go`):**
+   - پیاده‌سازی متد `CustomAgent.BuildPlan` بر پایه `planSystemPrompt` مشترک پکیج تا تیم‌های دلخواه از طریق ایجنت دیزاینر خود پلن پروژه را بسازند.
+   - اضافه شدن منطق اجرای تسک‌به‌تسک در `RunTeam`، اعتبارسنجی با `TaskVerifier`، اتصال به `Change Ledger` در `.project/ledger.jsonl` و کنترل استال با `progressWatcher`.
+   - تابع `applyPlanToTeamVerdict` برای جلوگیری از اعلام موفقیت تا قبل از اتمام همه تسک‌ها.
+
+۲. **تزریق تسک فعال به کانتکست تمام ایجنت‌ها (`coder.go`, `critic.go`, `security.go`, `custom.go`):**
+   - تعریف `activeTaskBrief` برای اعلام وضعیت تسک جاری دور و جلوگیری از گزارش باگ برای تسک‌های شروع‌نشده.
+   - تزریق شرط پذیرش (`DONE WHEN`) و تسک‌های قبلی به کدنویس‌های اصلی و سفارشی.
+
+۳. **تست‌ها و سلامت کامل:**
+   - تست‌های `TestPickPlanner`، `TestTeamFilesTouched`، و `TestApplyPlanToTeamVerdict` در `team_test.go`.
+   - تست‌های `TestRunTeamBuildsAPlan` در `plan_loop_test.go`.
+   - قبولی ۱۰۰٪ هر ۱۲ پکیج Go بک‌اند و تمیز بودن `go vet`.
+   - کامپایل باینری جدید `nexusd.exe` و اجرای دیمون روی ۸۰۸۰ و سرور فرانت روی ۳۰۰۰.
+
+---
+
 ## ۲۰۲۶-۱۰-۰۳ ۲۳:۱۵ — پیاده‌سازی کامل لجر تغییرات تغییرناپذیر (Change Ledger §30) + اتصال به ارکستریتور و API
 
 ۱. **پیاده‌سازی لجر در `backend/internal/workspace/project_brain.go`:**

@@ -49,6 +49,7 @@ Your role:
 	}
 
 	userPrompt := fmt.Sprintf("Project Goal: %s\n%s\nCodebase:\n%s", sCtx.UserPrompt, memories, codeContent)
+	userPrompt += activeTaskBrief(sCtx)
 
 	model := cr.getModelForRole(sCtx)
 	apiKey, baseURL, err := cr.getAPIKey(model, sCtx)

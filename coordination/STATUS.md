@@ -63,6 +63,8 @@ IDE چند-ایجنتی که ایجنت‌های هوش مصنوعی با هم �
 | **Change Ledger تغییرناپذیر (`.project/ledger.jsonl` — بند ۳۰ سند ویژن)** | کامل — Antigravity |
 | **اندپوینت REST لجر تغییرات (`GET /api/projects/{id}/ledger`)** | کامل — Antigravity |
 | **تأییدیه تست‌ها (۱۲ پکیج Go ۱۰۰٪ سبز + بیلد فرانت‌اند تمیز)** | کامل — Antigravity |
+| **اتصال Plan-Driven Loop به Custom Teams (`RunTeam`)** | کامل — Claude & Antigravity |
+| **تزریق تسک فعال به کانتکست کدنویس‌ها و بازبین‌ها (`activeTaskBrief`)** | کامل — Claude & Antigravity |
 
 ---
 

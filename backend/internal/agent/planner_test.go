@@ -19,7 +19,7 @@ func TestPlanner_NormalizePlan(t *testing.T) {
 		},
 	}
 
-	norm := normalizePlan(raw)
+	norm := NormalizePlan(raw)
 	if norm.Goal != "Build User Service" {
 		t.Errorf("expected trimmed goal, got %q", norm.Goal)
 	}
@@ -43,19 +43,19 @@ func TestPlanner_NormalizePlan(t *testing.T) {
 
 func TestPlanner_ValidatePlan(t *testing.T) {
 	// Empty tasks
-	err := validatePlan(domain.ProjectPlan{Goal: "Valid Goal", Tasks: nil})
+	err := ValidatePlan(domain.ProjectPlan{Goal: "Valid Goal", Tasks: nil})
 	if err == nil {
 		t.Errorf("expected error for empty tasks")
 	}
 
 	// Empty goal
-	err = validatePlan(domain.ProjectPlan{Goal: "", Tasks: []domain.ProjectTask{{ID: "1", Title: "Do X"}}})
+	err = ValidatePlan(domain.ProjectPlan{Goal: "", Tasks: []domain.ProjectTask{{ID: "1", Title: "Do X"}}})
 	if err == nil {
 		t.Errorf("expected error for empty goal")
 	}
 
 	// Valid
-	err = validatePlan(domain.ProjectPlan{Goal: "Valid Goal", Tasks: []domain.ProjectTask{{ID: "1", Title: "Do X"}}})
+	err = ValidatePlan(domain.ProjectPlan{Goal: "Valid Goal", Tasks: []domain.ProjectTask{{ID: "1", Title: "Do X"}}})
 	if err != nil {
 		t.Errorf("unexpected error for valid plan: %v", err)
 	}
