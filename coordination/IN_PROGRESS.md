@@ -3,17 +3,25 @@
 > **قانون: اگر فایلی اینجا رزرو شده، دست به آن نمی‌زنید.**
 > اگر فایلی که می‌خواهید تغییر دهید اینجاست، منتظر بمانید یا فایل دیگری بردارید.
 
-### 🔴 Claude — ۲۰۲۶-۱۰-۰۴ (در حال کار)
+### ✅ Claude & Antigravity — ۲۰۲۶-۱۰-۰۴ ۲۱:۲۰ (تمام شد)
 - **هدف:** قفل فایل با اجاره‌ی زمانی + مدل پیام «تسک = یک پیام زنده»
 - **کلاد (Claude):**
-  - `backend/internal/workspace/file_lock.go` (جدید) — قفل سبک با اجاره: claim در حین کار، release در پایان
-  - `backend/internal/workspace/file_lock_test.go` (جدید)
-  - `backend/internal/agent/agent.go` — دسترسی SwarmContext به لایه‌ی قفل
-  - `backend/internal/orchestrator/team.go` و `loop.go` — اتصال claim/release به حلقه
-  - `backend/internal/domain/types.go` — رویدادهای زنده‌ی پیام
-  - `frontend/src/App.tsx` — ادغام پیام به‌جای ساخت کارت جدید
-  - `frontend/src/types.ts` — تایپ‌های جدید
-- **لطفاً فایل‌های بالا را تا پایان کار من رزرو نگه دارید.**
+  - `backend/internal/workspace/file_lock.go` — قفل سبک با اجاره
+  - `backend/internal/workspace/file_lock_test.go` — تست‌های قفل
+  - `backend/internal/orchestrator/task_stream.go` — استریم زنده گام‌های تسک
+  - `frontend/src/types.ts` — تایپ‌های TaskStreamStep و FileLockInfo
+  - `frontend/src/components/TaskStreamCard.tsx` — کامپوننت کارت زنده تسک
+  - `frontend/src/styles/globals.css` — استایل‌های اختصاصی استریم تسک
+  - `frontend/src/components/composer/ComposerPanel.tsx` — ادغام کارت‌های زنده تسک و قفل فایل‌ها
+  - `frontend/src/App.tsx` — اتصال وب‌سوکت task_step و locks_changed
+- **آنتی‌گرویتی (Antigravity):**
+  - اصلاح شرط تست در `file_lock_test.go` و تعریف `RoleManager` و `RoleTester` در `domain/types.go`
+  - تکمیل اتصال پراپ‌های تسک‌استریم در `ComposerPanel.tsx` و راستی‌آزمایی بیلد فرانت‌اند با `npm run build` (۴ ثانیه تمیز)
+  - اجرای تست ۱۰۰٪ سبز هر ۱۲ پکیج Go بک‌اند و بررسی تمیز `go vet`
+  - کامپایل باینری تازه `nexusd.exe` و اجرای زنده دیمون روی پورت ۸۰۸۰
+  - تست زنده وب‌سوکت و UI در مرورگر با Playwright (۰ خطا)
+  - ثبت کامیت تمیز `d925113` در گیت
+- **تمام فایل‌ها آزاد هستند.**
 
 ### ✅ Claude & Antigravity — ۲۰۲۶-۱۰-۰۴ ۲۰:۰۰ (تمام شد)
 - **کلاد (Claude):**
