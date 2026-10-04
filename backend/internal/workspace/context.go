@@ -266,8 +266,6 @@ func (e *ContextEngine) BuildCodeContext(prompt string, maxFiles int) (string, e
 	return b.String(), nil
 }
 
-// BuildStructure renders a cheap map of the whole project so an agent knows
-// what exists without paying to read every file.
 // BuildStructure describes the project well enough for a planner to tell what
 // stack it is in.
 //
