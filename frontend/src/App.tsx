@@ -19,9 +19,12 @@ import {
   MemoryEntry, 
   SkillManifest,
   ProjectPlan,
-  AgentUsage
+  AgentUsage,
+  TaskStreamStep,
+  FileLockInfo
 } from './types';
 import { SwarmPreset, SWARM_PRESETS } from './config/models';
+import { TaskStreamCard } from './components/TaskStreamCard';
 import { TeamBuilderModal } from './components/teams/TeamBuilderModal';
 import { Team } from './types/team';
 import { OpenProjectModal } from './components/projects/OpenProjectModal';
@@ -88,6 +91,28 @@ export const App: React.FC = () => {
   const [currentRound, setCurrentRound] = useState<number>(1);
   const [thinkingAgent, setThinkingAgent] = useState<{ role: string, status: string } | null>(null);
   const [agentUsage, setAgentUsage] = useState<Record<string, AgentUsage>>({});
+  /**
+   * Live per-task conversations, keyed by task id.
+   *
+   * This is what replaced "one bubble per utterance". A task's steps accumulate
+   * here and render as a single card, so the transcript stays readable at 25
+   * tasks instead of collapsing into hundreds of disconnected messages.
+   */
+  const [taskStreams, setTaskStreams] = useState<Record<string, TaskStreamStep[]>>({});
+  const [taskStreamTitles, setTaskStreamTitles] = useState<Record<string, string>>({});
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [fileLocks, setFileLocks] = useState<FileLockInfo[]>([]);
+
+  /** Append one step to its task's stream, replacing it on a retry. */
+  const appendTaskStep = useCallback((taskId: string, step: TaskStreamStep, reset?: boolean, title?: string) => {
+    setTaskStreams((prev) => {
+      const existing = reset ? [] : (prev[taskId] ?? []);
+      return { ...prev, [taskId]: [...existing, step] };
+    });
+    if (title) {
+      setTaskStreamTitles((prev) => ({ ...prev, [taskId]: title }));
+    }
+  }, []);
 
   const handleUpdateAgentModel = (role: string, model: string) => {
     setAgentModels((prev) => {
@@ -191,6 +216,28 @@ export const App: React.FC = () => {
         setAgentUsage((prev) => ({ ...prev, ...event.usage }));
       }
       switch (event.type) {
+        case 'task_step': {
+          // A step joins its task's existing card rather than becoming a new
+          // message. This is the whole point: the user watches one task unfold
+          // instead of scrolling through hundreds of separate utterances.
+          if (!event.task_id || !event.stream) break;
+          appendTaskStep(event.task_id, event.stream, event.stream_reset);
+          setActiveTaskId(event.task_id);
+          // The opening step carries the task title, so the card can be labelled
+          // without a second lookup.
+          if (event.stream_reset) {
+            const match = event.stream.text.match(/^(.*?):\s*(.+)$/);
+            if (match) {
+              setTaskStreamTitles((prev) => ({ ...prev, [event.task_id!]: match[2] }));
+            }
+          }
+          break;
+        }
+
+        case 'locks_changed':
+          setFileLocks(event.locks ?? []);
+          break;
+
         case 'round_started':
           setCurrentRound(event.round);
           setIsRunning(true);
@@ -810,6 +857,10 @@ export const App: React.FC = () => {
             onOpenTeamBuilder={() => setShowTeamBuilder(true)}
             plan={projectPlan}
             usage={agentUsage}
+            taskStreams={taskStreams}
+            taskStreamTitles={taskStreamTitles}
+            activeTaskId={activeTaskId}
+            fileLocks={fileLocks}
           />
         )}
 

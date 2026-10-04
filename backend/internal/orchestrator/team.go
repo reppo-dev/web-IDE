@@ -97,6 +97,12 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 	// run ended. A team now gets the same treatment — one task per round, and
 	// completion decided by the plan rather than by the score.
 	watcher := newProgressWatcher(3)
+	// Same lock coordinator the built-in swarm installs in runPlanDrivenLoop. A
+	// custom team has more agents and less predictability about who edits what, so
+	// it needs this at least as much as the fixed five do.
+	if sCtx.FileLocks == nil {
+		sCtx.FileLocks = workspace.NewFileLockManager()
+	}
 	verifier := agent.NewTaskVerifier(o.llmClient())
 	if o.sandbox != nil {
 		verifier.SetTestRunner(o.sandbox.RunTests)
@@ -134,7 +140,34 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 
 		filesBefore := sCtx.CodeFilesSnapshot()
 
+		// Hold the task's files for the duration of the phases, exactly as the
+		// built-in swarm does. A custom team is the case that needs this most:
+		// its members are chosen by the user, several may implement, and nothing
+		// about their file sets is predictable in advance.
+		var claimed []string
+		if task != nil {
+			var claimOK bool
+			var claimReason string
+			claimed, claimOK, claimReason = o.claimTaskFiles(sCtx, task, "team")
+			if !claimOK {
+				// Park the task and move on. The round is not failed: another
+				// task may be free, and forcing the edit is what produces two
+				// agents disagreeing about the same file.
+				sCtx.SendTaskBackToRework(claimReason)
+				o.persistPlan(sCtx, ws)
+				o.broadcast(SwarmEvent{
+					Type:    EventAgentOutput,
+					ProjectID: projectID,
+					Round:   round,
+					Agent:   domain.RoleCoder,
+					Payload: claimReason,
+				})
+				continue
+			}
+		}
+
 		if err := o.runTeamPhases(ctx, sCtx, projectID, specs, ws); err != nil {
+			o.releaseTaskFiles(sCtx, "team", claimed)
 			return nil, err
 		}
 
@@ -157,6 +190,15 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 		// the task was supposed to deliver.
 		touched := teamFilesTouched(sCtx, filesBefore, sCtx.CodeFilesSnapshot())
 		sCtx.SetActiveTaskFiles(touched)
+
+		// Drop the hold now that the files are on disk: it covers the edit, not
+		// the review that follows. Files the team actually produced are released
+		// as well, since the plan's file list is a prediction and a task usually
+		// writes something it did not name.
+		o.releaseTaskFiles(sCtx, "team", claimed)
+		if len(touched) > 0 {
+			o.releaseTaskFiles(sCtx, "team", touched)
+		}
 
 		// Verify the task against the real code before anyone scores it.
 		if task != nil {
@@ -275,6 +317,48 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 // own. It is a safety valve, not a definition of done: a team whose plan is
 // larger than this keeps its unfinished state on disk and continues next run.
 const teamDefaultRoundLimit = 40
+
+// claimTaskFiles takes a short-lived hold on the files a task is about to touch.
+//
+// The lock is the answer to the failure that a plan alone cannot prevent: two
+// agents editing the same shared file at the same time. Each edit is individually
+// valid, and the result is a project whose colors, types and routes no longer
+// agree with one another.
+//
+// It returns false when another agent currently holds one of the files, and in
+// that case nothing is held and the caller must not proceed to edit. Returning
+// false rather than blocking is deliberate — the caller can move to other work
+// instead of deadlocking behind a colleague.
+func (o *Orchestrator) claimTaskFiles(sCtx *agent.SwarmContext, task *domain.ProjectTask, agentName string) ([]string, bool, string) {
+	if sCtx == nil || task == nil || len(task.Files) == 0 {
+		// Nothing is known to be touched, so there is nothing to exclude anyone
+		// from. Files produced later are still visible to the verification gate.
+		return nil, true, ""
+	}
+
+	taskID := task.ID
+	ok, reason := sCtx.ClaimFiles(agentName, taskID, task.Files)
+	if !ok {
+		log.Printf("task %s cannot start: %s", taskID, reason)
+		return nil, false, reason
+	}
+	return task.Files, true, ""
+}
+
+// releaseTaskFiles drops the hold taken for a task.
+//
+// This runs as soon as the work concludes, which is what keeps the lock light:
+// the requirement is that a file is held only while an agent is working on it,
+// not for the rest of the run. A file left locked until the end would block an
+// unrelated later task for no reason.
+func (o *Orchestrator) releaseTaskFiles(sCtx *agent.SwarmContext, agentName string, files []string) {
+	if sCtx == nil || agentName == "" {
+		return
+	}
+	if released := sCtx.ReleaseFiles(agentName, files); len(released) > 0 {
+		log.Printf("%s released %d file lock(s)", agentName, len(released))
+	}
+}
 
 // applyPlanToTeamVerdict re-decides a team's verdict against its plan.
 //

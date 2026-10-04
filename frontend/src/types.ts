@@ -1,7 +1,7 @@
 import type { Team } from './types/team';
 export type { Team, AgentSpec, AgentPhase } from './types/team';
 
-export type AgentRole = 'architect' | 'coder' | 'critic' | 'security' | 'arbiter';
+export type AgentRole = 'architect' | 'coder' | 'critic' | 'security' | 'arbiter' | 'manager' | 'tester';
 export type ExecutionMode = 'sequential' | 'concurrent' | 'rolebased';
 
 export interface CodeFile {
@@ -125,7 +125,7 @@ export interface ChangeLedgerEntry {
 }
 
 export interface SwarmEvent {
-  type: 'agent_thinking' | 'agent_output' | 'round_started' | 'round_complete' | 'consensus_reached' | 'code_updated' | 'error' | 'teams_data' | 'team_saved' | 'team_deleted' | 'run_started' | 'plan_updated';
+  type: 'agent_thinking' | 'agent_output' | 'round_started' | 'round_complete' | 'consensus_reached' | 'code_updated' | 'error' | 'teams_data' | 'team_saved' | 'team_deleted' | 'run_started' | 'plan_updated' | 'task_step' | 'locks_changed';
   project_id: string;
   round: number;
   /** The agent that produced this event. "manager" is the orchestrator itself. */
@@ -145,4 +145,43 @@ export interface SwarmEvent {
   team?: Team;
   /** team_deleted: the id that was removed. */
   team_id?: string;
+  /** task_id: which task this event belongs to. Absent for run-level events. */
+  task_id?: string;
+  /** task_step: one entry appended to a task's live card. */
+  stream?: TaskStreamStep;
+  /** task_step: start a fresh card, because the task is being retried. */
+  stream_reset?: boolean;
+  /** locks_changed: the files currently held by some agent. */
+  locks?: FileLockInfo[];
+}
+
+/**
+ * One entry in a task's live conversation.
+ *
+ * A task is a single card that fills in as the work happens, rather than a run of
+ * separate bubbles. `kind` decides how the row renders, which is what lets the
+ * card read as work in progress instead of a wall of prose.
+ */
+export interface TaskStreamStep {
+  task_id: string;
+  agent: AgentRole | 'manager' | 'tester';
+  /** thought | tool | edit | test | review | decision | lock */
+  kind: 'thought' | 'tool' | 'edit' | 'test' | 'review' | 'decision' | 'lock';
+  text: string;
+  files?: string[];
+  at: string;
+}
+
+/**
+ * A file an agent currently holds.
+ *
+ * Shown so two agents working the same project are visible rather than merely
+ * conflicting — without this the user only discovers the collision by noticing
+ * that the two results disagree.
+ */
+export interface FileLockInfo {
+  path: string;
+  agent: string;
+  task_id: string;
+  acquired_at: string;
 }

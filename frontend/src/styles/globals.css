@@ -31,3 +31,169 @@
 [dir="rtl"], .font-persian {
   font-family: 'Vazirmatn', sans-serif;
 }
+
+/* ============================================================
+   Live per-task cards
+   One card per task, with steps appended as the work happens. The
+   scroll container is capped so a long task grows downward inside its
+   own card instead of pushing the composer off-screen.
+   ============================================================ */
+
+.task-stream-card {
+  border: 1px solid #262626;
+  border-radius: 6px;
+  background: #101010;
+  overflow: hidden;
+}
+
+.task-stream-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  background: #171717;
+  border: none;
+  cursor: pointer;
+  text-align: right;
+  font-size: 11px;
+  color: #d4d4d4;
+}
+
+.task-stream-header:hover {
+  background: #1f1f1f;
+}
+
+.task-stream-caret {
+  display: inline-block;
+  transition: transform 0.15s ease;
+  color: #71717a;
+  font-size: 10px;
+}
+
+.task-stream-caret.open {
+  transform: rotate(-90deg);
+}
+
+.task-stream-id {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  color: #818cf8;
+  flex-shrink: 0;
+}
+
+.task-stream-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #e4e4e7;
+}
+
+.task-stream-count {
+  font-size: 10px;
+  color: #71717a;
+  flex-shrink: 0;
+}
+
+/* A slow pulse rather than a spinner: the user needs to see that work is
+   happening, not a precise frame count. */
+.task-stream-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  animation: task-pulse 1.6s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes task-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+.task-stream-body {
+  position: relative;
+  border-top: 1px solid #1f1f1f;
+}
+
+.task-stream-scroll {
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 6px 10px;
+}
+
+.task-stream-empty {
+  font-size: 10px;
+  color: #52525b;
+  padding: 4px 0;
+}
+
+.task-stream-step {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 11px;
+  line-height: 1.6;
+  border-bottom: 1px solid #1a1a1a;
+}
+
+.task-stream-step:last-child {
+  border-bottom: none;
+}
+
+.task-stream-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.task-stream-kind {
+  flex-shrink: 0;
+  font-size: 10px;
+}
+
+.task-stream-agent {
+  flex-shrink: 0;
+  font-weight: 600;
+  font-size: 10px;
+}
+
+.task-stream-text {
+  flex: 1;
+  color: #a1a1aa;
+  word-break: break-word;
+}
+
+.task-stream-files {
+  flex-shrink: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 9px;
+  color: #52525b;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: ltr;
+}
+
+.task-stream-jump {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 10px;
+  font-size: 10px;
+  background: #27272a;
+  color: #e4e4e7;
+  border: 1px solid #3f3f46;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.task-stream-jump:hover {
+  background: #3f3f46;
+}

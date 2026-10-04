@@ -136,11 +136,32 @@ func recordReviewFailure(sCtx *agent.SwarmContext, what string, err error) {
 //  3. It has no round ceiling. It stops when the plan is complete, or when the
 //     swarm is provably stuck, and it reports which of those happened.
 func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmContext, projectID string, ws *workspace.Workspace) (*agent.SwarmContext, error) {
+	// Every execution path reaches the project through here, so this is where
+	// file locking is switched on. Installing it in each caller instead would
+	// mean a mode added later silently runs unprotected — the same mistake that
+	// left one path behind when the plan-driven loop was adopted.
+	//
+	// The manager is per-run and lives in memory. It coordinates the agents of
+	// this run only; a lock must never outlive the process that took it, so
+	// nothing is written to disk that would need recovering later.
+	if sCtx.FileLocks == nil {
+		sCtx.FileLocks = workspace.NewFileLockManager()
+	}
+
 	watcher := newProgressWatcher(3)
 	verifier := agent.NewTaskVerifier(o.client)
 	if o.sandbox != nil {
 		verifier.SetTestRunner(o.sandbox.RunTests)
 	}
+
+	// Every lock this run takes is dropped when it ends, including on an early
+	// return or a panic. A hold left behind would keep the next run's agents out
+	// of files for no reason.
+	defer func() {
+		for _, lock := range sCtx.LockedFiles() {
+			sCtx.ReleaseFiles(lock.Agent, []string{lock.Path})
+		}
+	}()
 
 	for {
 		// A cancelled context is a user request, not a failure of the project.
@@ -224,9 +245,42 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 			Payload:   fmt.Sprintf("Task %s: %s", task.ID, task.Title),
 		})
 
+		// Open this task's live card. Everything that follows — what the coder
+		// decided, which files changed, what the tester found — appends to this
+		// one card instead of arriving as a separate chat bubble.
+		o.beginTaskStream(projectID, sCtx.Round, task)
+
 		// 2. Implement the task. The file set is snapshotted first so this
 		// round's real output can be told apart from everything built earlier.
 		filesBefore := sCtx.CodeFilesSnapshot()
+
+		// Take a short-lived hold on the files this task will touch.
+		//
+		// A plan alone cannot prevent two agents from rewriting the same shared
+		// file: no planner sees the other agent's later edits, so both plans are
+		// individually reasonable and the project ends up inconsistent. Only
+		// mutual exclusion stops that.
+		//
+		// A refused claim does not end the round. The task is parked so the swarm
+		// picks up different work and returns when the file is free, which beats
+		// both forcing the edit and deadlocking behind a colleague.
+		claimedFiles, claimOK, claimReason := o.claimTaskFiles(sCtx, task, string(domain.RoleCoder))
+		if !claimOK {
+			// Shown in the task's own card, not as a stray bubble: a blocked
+			// agent is the most confusing thing a user can watch happen, so it
+			// says which file, who holds it, and on what.
+			o.stepLock(projectID, sCtx.Round, task.ID, domain.RoleCoder, claimReason)
+			sCtx.SendTaskBackToRework(claimReason)
+			o.persistPlan(sCtx, ws)
+			continue
+		}
+		o.broadcastLocks(sCtx, projectID, sCtx.Round)
+		// Released explicitly once this round's work concludes, NOT deferred.
+		// A defer inside this loop would not run until the whole run ended, so a
+		// file locked in round 2 would still be held in round 20 — the opposite
+		// of the requirement that a file is locked only while it is being worked
+		// on.
+		releaseClaim := func() { o.releaseTaskFiles(sCtx, string(domain.RoleCoder), claimedFiles) }
 
 		// 2. Implement the task.
 		o.broadcast(SwarmEvent{
@@ -236,8 +290,17 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 			Agent:     domain.RoleCoder,
 			Payload:   fmt.Sprintf("در حال پیاده‌سازی تسک %s: %s", task.ID, task.Title),
 		})
+		// What the coder is about to do, in its own words. This is the line that
+		// makes the card read as an agent working rather than a file changing.
+		o.stepThought(projectID, sCtx.Round, task.ID, domain.RoleCoder, "",
+			fmt.Sprintf("در حال پیاده‌سازی تسک %s: %s", task.ID, task.Title))
+
 		coderMsg, err := o.coder.Execute(ctx, sCtx)
 		if err != nil {
+			// The coder failed, so nothing is being written to these files any
+			// more. Drop the hold on both exits below, or the next run would find
+			// them locked by an agent that no longer exists.
+			releaseClaim()
 			if errors.Is(err, llm.ErrBudgetExhausted) {
 				log.Printf("token budget exhausted on task %s, transitioning to WAITING_FOR_HUMAN", task.ID)
 				sCtx.SetTaskState(task.ID, domain.TaskWaiting)
@@ -278,6 +341,28 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 		touched := filesTouchedThisRound(sCtx, filesBefore, sCtx.CodeFilesSnapshot())
 		sCtx.SetActiveTaskFiles(touched)
 
+		// Show what actually landed on disk. The file list is the concrete part
+		// of "the work happened", and it is what the user would otherwise have to
+		// infer from the diff view.
+		if len(touched) > 0 {
+			o.stepEdit(projectID, sCtx.Round, task.ID, domain.RoleCoder,
+				fmt.Sprintf("%d فایل تغییر کرد", len(touched)), touched)
+		}
+
+		// The hold covers the edit and nothing more, so it is dropped here — the
+		// moment the files are safely on disk. Review and verification only read,
+		// and holding the lock through them would keep other agents out of a file
+		// nobody is writing any more.
+		//
+		// Files the coder actually produced are released too. The planner's list
+		// is a guess, and a task commonly writes a file nobody predicted; leaving
+		// that one locked would strand it for the rest of the run.
+		releaseClaim()
+		if extra := touched; len(extra) > 0 {
+			o.releaseTaskFiles(sCtx, string(domain.RoleCoder), extra)
+		}
+		o.broadcastLocks(sCtx, projectID, sCtx.Round)
+
 		// 4. Review. Compilation failures are injected as real issues so a
 		// broken build cannot be talked past.
 		o.runCompilationGate(ctx, sCtx, ws)
@@ -309,6 +394,18 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 			}
 		}
 		sCtx.SetLastTaskVerdict(verdict)
+
+		// The evidence a task was judged on, in the task's own card. This is the
+		// line that separates "the agent says it is done" from "the files exist and
+		// the tests ran" — the distinction the whole verification gate exists for.
+		if verdict != nil {
+			if verdict.Passed {
+				o.stepTest(projectID, sCtx.Round, task.ID, "تست‌ها پاس شدند: "+verdict.Summary)
+			} else {
+				o.stepReview(projectID, sCtx.Round, task.ID, domain.RoleTester,
+					"تست‌ها پاس نشدند و تسک به بازگشت رفت: "+verdict.Summary)
+			}
+		}
 
 		if verdict != nil {
 			if verdict.Passed {

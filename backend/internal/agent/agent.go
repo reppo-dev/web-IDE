@@ -67,10 +67,67 @@ type SwarmContext struct {
 	// UsageByAgent tracks cumulative token consumption per agent (PROJECT_VISION §37).
 	UsageByAgent map[string]*domain.AgentUsage
 
+	// FileLocks coordinates which files each agent may edit at the same time.
+	//
+	// It is optional. When nil, callers are assumed to be the only writer, which
+	// is the single-agent case; the orchestrator installs a real manager so
+	// concurrent agents cannot overwrite each other's shared files.
+	FileLocks *workspace.FileLockManager
+
 	// mu guards the mutable fields above. Agents inside a phase run
 	// concurrently and all write to the same context, so without this a
 	// custom team's shared state would be corrupted.
 	mu sync.RWMutex
+}
+
+// ClaimFiles takes a short-lived hold on the files an agent is about to edit.
+//
+// It reports ok=false plus a human-readable reason when another agent already
+// holds one of them. The reason names the holder and its task on purpose: an
+// agent told "theme.css is being edited by coder on T-007" can pick different
+// work, whereas one told only "locked" tends to force the edit anyway and
+// produces the exact conflict this lock exists to prevent.
+//
+// The hold covers the edit itself and is dropped as soon as the work ends, so an
+// agent is never kept out of a file by work that has already finished. An
+// abandoned hold expires on its own rather than deadlocking the run.
+func (s *SwarmContext) ClaimFiles(agent, taskID string, paths []string) (ok bool, reason string) {
+	if s == nil || s.FileLocks == nil {
+		// No manager means no coordination is possible or needed; letting the
+		// caller proceed keeps the single-writer path working unchanged.
+		return true, ""
+	}
+	result := s.FileLocks.Claim(agent, taskID, paths)
+	if result.Acquired {
+		return true, ""
+	}
+	return false, workspace.DescribeConflicts(result.Conflicts)
+}
+
+// ReleaseFiles drops the hold on files an agent no longer needs.
+func (s *SwarmContext) ReleaseFiles(agent string, paths []string) []string {
+	if s == nil || s.FileLocks == nil {
+		return nil
+	}
+	return s.FileLocks.Release(agent, paths)
+}
+
+// ReleaseAllFiles drops every hold an agent has, which is what keeps the lock
+// short-lived in practice: finishing a task frees everything it touched.
+func (s *SwarmContext) ReleaseAllFiles(agent string) []string {
+	if s == nil || s.FileLocks == nil {
+		return nil
+	}
+	return s.FileLocks.ReleaseAll(agent)
+}
+
+// LockedFiles reports every file currently held by any agent, so the UI can show
+// who is working where instead of agents silently colliding.
+func (s *SwarmContext) LockedFiles() []workspace.FileLock {
+	if s == nil || s.FileLocks == nil {
+		return nil
+	}
+	return s.FileLocks.Active()
 }
 
 // RecordAgentUsage records token usage for an agent in a thread-safe manner (PROJECT_VISION §37).

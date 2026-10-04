@@ -14,6 +14,17 @@ const (
 	RoleCritic    AgentRole = "critic"
 	RoleSecurity  AgentRole = "security"
 	RoleArbiter   AgentRole = "arbiter"
+	// RoleManager is the orchestrator when it speaks as an agent: opening a task,
+	// handing work out, or reporting a blocked file. PROJECT_VISION §10 lists
+	// Manager/Orchestrator as a role, but it had no constant — so everything the
+	// orchestrator wanted to say had to be mislabelled as some other agent's
+	// output, which made the log read as though the coder had decided policy.
+	RoleManager AgentRole = "manager"
+	// RoleTester is the agent that produces verification evidence. It is distinct
+	// from the critic, who reads the code: conflating them let a review opinion
+	// stand in for a passing test, which is the exact gap the verification gate
+	// was built to close.
+	RoleTester AgentRole = "tester"
 	// RoleCustom marks an agent whose behaviour comes entirely from the user's
 	// prompt. It carries no built-in persona, which is what lets a team grow
 	// beyond the shipped roles without new Go code.

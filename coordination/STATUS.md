@@ -69,6 +69,8 @@ IDE چند-ایجنتی که ایجنت‌های هوش مصنوعی با هم �
 | **سقف سخت Rework = ۳ و تشخیص تکرار خطا + ارتقا به `WAITING_FOR_HUMAN` (بند ۱۹)** | کامل — Claude & Antigravity |
 | **حفاظت و سانسور اسرار و توکن‌ها (`RedactSecrets` + `SafeReadPath` — بند ۲۵)** | کامل — Antigravity & Claude |
 | **تفکیک توکن‌ها و دفعات فراخوانی به‌ازای Agent و Model (§۳۷ Observability)** | کامل — Antigravity |
+| **قفل فایل با اجاره زمانی (File Lease Lock — جلوگیری از تصادم در فایل‌های مشترک)** | کامل — Claude & Antigravity |
+| **کارت زنده استریم تسک‌ها (Task = One Live Message و کامپوننت `TaskStreamCard`)** | کامل — Claude & Antigravity |
 
 ---
 

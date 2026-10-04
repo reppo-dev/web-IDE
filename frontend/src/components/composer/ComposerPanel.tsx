@@ -28,9 +28,10 @@ import {
   Zap,
   BarChart3
 } from 'lucide-react';
-import { AgentMessage, ArbiterVerdict, ExecutionMode, AgentRole, ProjectPlan, AgentUsage } from '../../types';
+import { AgentMessage, ArbiterVerdict, ExecutionMode, AgentRole, ProjectPlan, AgentUsage, TaskStreamStep, FileLockInfo } from '../../types';
 import { AVAILABLE_MODELS, SWARM_PRESETS, SwarmPreset } from '../../config/models';
 import { Team } from '../../types/team';
+import { TaskStreamCard } from '../TaskStreamCard';
 
 interface ComposerPanelProps {
   messages: AgentMessage[];
@@ -58,6 +59,21 @@ interface ComposerPanelProps {
   plan?: ProjectPlan | null;
   /** Cumulative token usage per agent (PROJECT_VISION §37). */
   usage?: Record<string, AgentUsage>;
+  /**
+   * Live per-task conversations, keyed by task id.
+   *
+   * One card per task rather than one bubble per utterance: a twenty-five task
+   * project used to produce hundreds of chat messages the user had to scroll back
+   * through to work out what had happened. Each task now unfolds inside a single
+   * card, newest step last.
+   */
+  taskStreams?: Record<string, TaskStreamStep[]>;
+  /** Task titles, keyed by task id, for the card headers. */
+  taskStreamTitles?: Record<string, string>;
+  /** The task being worked on right now; its card carries a live indicator. */
+  activeTaskId?: string | null;
+  /** Files currently held by an agent, so concurrent editing is visible. */
+  fileLocks?: FileLockInfo[];
 }
 
 // Helper to render simple markdown cleanly without heavy external libs
@@ -176,6 +192,10 @@ export const ComposerPanel: React.FC<ComposerPanelProps> = ({
   onOpenTeamBuilder,
   plan,
   usage,
+  taskStreams,
+  taskStreamTitles,
+  activeTaskId,
+  fileLocks,
 }) => {
   const [prompt, setPrompt] = useState('');
   const [showRoster, setShowRoster] = useState(false);
@@ -542,6 +562,46 @@ export const ComposerPanel: React.FC<ComposerPanelProps> = ({
           )}
         </div>
       )}
+
+      {/* Live per-task cards: one conversation per task, filling in live. */}
+      {taskStreams && Object.keys(taskStreams).length > 0 && (() => {
+        // Newest task first: the one being worked on right now is the one the
+        // user came to look at.
+        const ids = Object.keys(taskStreams).sort((a, b) => {
+          if (a === activeTaskId) return -1;
+          if (b === activeTaskId) return 1;
+          return (taskStreams[b]?.length ?? 0) - (taskStreams[a]?.length ?? 0);
+        });
+
+        return (
+          <div className="task-streams-panel border-b border-[#222222] bg-[#141414]/90 px-3 py-2">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] font-semibold text-zinc-200">
+                جریان زنده‌ی تسک‌ها
+              </span>
+              {/* Locks make concurrent editing visible. Two agents on one file is
+                  otherwise something the user only discovers by noticing that the
+                  two results disagree. */}
+              {fileLocks && fileLocks.length > 0 && (
+                <span className="text-[10px] text-orange-400 flex items-center gap-1">
+                  🔒 {fileLocks.length} فایل در حال ویرایش
+                </span>
+              )}
+            </div>
+            <div className="space-y-1.5 max-h-[45vh] overflow-y-auto">
+              {ids.map((id) => (
+                <TaskStreamCard
+                  key={id}
+                  taskId={id}
+                  title={taskStreamTitles?.[id] ?? ''}
+                  steps={taskStreams[id] ?? []}
+                  running={id === activeTaskId && isRunning}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Project Plan Task Tracker Board */}
       {plan && plan.tasks && plan.tasks.length > 0 && (() => {

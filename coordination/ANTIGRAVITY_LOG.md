@@ -3,7 +3,28 @@
 > این فایل متعلق به ایجنت Antigravity است.
 > اگر Claude اینجا را خواند، **دست به آن نزنید** — فقط بخوانید تا بدانید چه کرده.
 
-## ۲۰۲۶-۱۰-۰۴ ۲۰:۰۰ — تست مجدد زنده با مارکرهای جدید و رفع کامل هالوسینیشن استک (۲۵ تسک بومی فلاتر)
+## ۲۰۲۶-۱۰-۰۴ ۲۱:۱۵ — تأیید و تست کامل قفل فایل با اجاره (File Lease Lock) + استریم کارت زنده تسک (Task = One Live Message)
+
+۱. **راستی‌آزمایی و تثبیت لایه‌ی بک‌اند (File Lock & Task Stream):**
+   - راستی‌آزمایی کامل `backend/internal/workspace/file_lock.go` و رفع شرط تست `TestPathSpellingsResolveToOneLock` در `file_lock_test.go`.
+   - تعریف نقش‌های صریح `RoleManager` و `RoleTester` در `backend/internal/domain/types.go`.
+   - بررسی و تست ادغام متدهای قفل و رویدادهای استریم زنده در `orchestrator.go`، `loop.go`، `team.go` و `agent.go`.
+   - **نتیجه تست بک‌اند:** هر ۱۲ پکیج Go بک‌اند با `go test -count=1 ./internal/... ./api/...` در ۹ ثانیه **۱۰۰٪ سبز** شدند و `go vet ./...` بدون کوچک‌ترین خطایی تأیید شد.
+   - کامپایل باینری تازه `backend/nexusd.exe` و اجرای دیمون جدید روی پورت ۸۰۸۰.
+
+۲. **راستی‌آزمایی و تلفیق لایه‌ی فرانت‌اند (Task = One Live Message):**
+   - ایجاد کامپوننت مدرن `TaskStreamCard.tsx` با قابلیت آکاردئونی، اسکرول خودکار هوشمند، جهش به جدیدترین گام و استایل‌های اختصاصی در `globals.css`.
+   - اتصال تایپ‌های `TaskStreamStep` و `FileLockInfo` در `frontend/src/types.ts`.
+   - تکمیل اتصال پراپ‌های `taskStreams`، `taskStreamTitles`، `activeTaskId` و `fileLocks` در `ComposerPanel.tsx` و `App.tsx`.
+   - **نتیجه بیلد فرانت‌اند:** دستور `npm run build` در ۴.۰۷ ثانیه با **۰ خطای تایپ‌اسکریپت و ویت** کامپایل شد.
+   - راستی‌آزمایی زنده در مرورگر با Playwright روی `http://localhost:3000`: ارتباط وب‌سوکت برقرار (`Daemon Live (:8080)`) و کنسول مرورگر کاملاً تمیز با ۰ خطا.
+
+۳. **پایداری سرورها و پروژه کاربر:**
+   - سرور Vite روی پورت ۳۰۰۰ لایو است.
+   - دیمون NexusAI روی پورت ۸۰۸۰ با کدهای تازه لایو است.
+   - اپلیکیشن دوالینگو فلاتر روی پورت ۵۰۵۰ لایو است (`Duolingo English for Persian Learners`).
+
+---
 
 ۱. **ادغام و راستی‌آزمایی تغییرات کلود:**
    - تست و تأیید `existingStructureBrief` مشترک بین هر دو پلنر (`planner.go` و `custom.go`).

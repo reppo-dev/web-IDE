@@ -12,6 +12,7 @@ import (
 	"github.com/nexusai/nexusai/backend/internal/memory"
 	"github.com/nexusai/nexusai/backend/internal/sandbox"
 	"github.com/nexusai/nexusai/backend/internal/scoring"
+	"github.com/nexusai/nexusai/backend/internal/workspace"
 )
 
 // EventType defines the kind of orchestrator event broadcast to listeners.
@@ -26,6 +27,8 @@ const (
 	EventCodeUpdated      EventType = "code_updated"
 	EventError            EventType = "error"
 	EventPlanUpdated      EventType = "plan_updated"
+	EventTaskStep         EventType = "task_step"
+	EventLocksChanged     EventType = "locks_changed"
 )
 
 // SwarmEvent is the real-time event dispatched during swarm execution.
@@ -41,6 +44,43 @@ type SwarmEvent struct {
 	Plan      *domain.ProjectPlan          `json:"plan,omitempty"`
 	Usage     map[string]domain.AgentUsage `json:"usage,omitempty"`
 	Timestamp time.Time                    `json:"timestamp"`
+
+	// TaskID and Stream carry the live per-task conversation.
+	//
+	// Every step an agent took used to arrive as its own chat card, so a
+	// twenty-five task project produced hundreds of cards the user had to scroll
+	// back through to reassemble. One task is one stream instead: steps append to
+	// it and the card fills in as the work happens. TaskID names the stream and is
+	// empty for run-level events that belong to no single task.
+	TaskID string `json:"task_id,omitempty"`
+	Stream *TaskStreamStep `json:"stream,omitempty"`
+	// StreamReset tells the client to start a fresh stream. A retried task needs
+	// this: its earlier attempts are history, not the current state of the work.
+	StreamReset bool `json:"stream_reset,omitempty"`
+	// Locks lists the files currently held, so the UI can show who is editing
+	// what instead of two agents silently colliding on a shared file.
+	Locks []workspace.FileLock `json:"locks,omitempty"`
+}
+
+// TaskStreamStep is one entry in a task's live conversation.
+//
+// Kind is what the UI renders: a line of reasoning, a tool call, a set of edits,
+// a test result. Distinguishing them is what makes the card read as work in
+// progress rather than as a wall of prose.
+type TaskStreamStep struct {
+	// TaskID repeats the stream's owner so a client can route a step that
+	// arrives without the enclosing event.
+	TaskID string `json:"task_id"`
+	// Agent is who took this step.
+	Agent domain.AgentRole `json:"agent"`
+	// Kind is the step type: thought, tool, edit, test, review, decision.
+	Kind string `json:"kind"`
+	// Text is the human-readable content of the step.
+	Text string `json:"text"`
+	// Files lists the paths this step wrote or changed, if any.
+	Files []string `json:"files,omitempty"`
+	// At is when the step happened.
+	At time.Time `json:"at"`
 }
 
 // Config holds runtime parameters for the orchestrator.

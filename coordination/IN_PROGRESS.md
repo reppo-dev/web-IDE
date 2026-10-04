@@ -3,6 +3,18 @@
 > **قانون: اگر فایلی اینجا رزرو شده، دست به آن نمی‌زنید.**
 > اگر فایلی که می‌خواهید تغییر دهید اینجاست، منتظر بمانید یا فایل دیگری بردارید.
 
+### 🔴 Claude — ۲۰۲۶-۱۰-۰۴ (در حال کار)
+- **هدف:** قفل فایل با اجاره‌ی زمانی + مدل پیام «تسک = یک پیام زنده»
+- **کلاد (Claude):**
+  - `backend/internal/workspace/file_lock.go` (جدید) — قفل سبک با اجاره: claim در حین کار، release در پایان
+  - `backend/internal/workspace/file_lock_test.go` (جدید)
+  - `backend/internal/agent/agent.go` — دسترسی SwarmContext به لایه‌ی قفل
+  - `backend/internal/orchestrator/team.go` و `loop.go` — اتصال claim/release به حلقه
+  - `backend/internal/domain/types.go` — رویدادهای زنده‌ی پیام
+  - `frontend/src/App.tsx` — ادغام پیام به‌جای ساخت کارت جدید
+  - `frontend/src/types.ts` — تایپ‌های جدید
+- **لطفاً فایل‌های بالا را تا پایان کار من رزرو نگه دارید.**
+
 ### ✅ Claude & Antigravity — ۲۰۲۶-۱۰-۰۴ ۲۰:۰۰ (تمام شد)
 - **کلاد (Claude):**
   - بازنویسی و تلفیق `existingStructureBrief` مشترک بین هر دو پلنر در `backend/internal/agent/planner.go` و `custom.go`
