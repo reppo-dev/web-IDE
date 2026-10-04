@@ -268,15 +268,94 @@ func (e *ContextEngine) BuildCodeContext(prompt string, maxFiles int) (string, e
 
 // BuildStructure renders a cheap map of the whole project so an agent knows
 // what exists without paying to read every file.
+// BuildStructure describes the project well enough for a planner to tell what
+// stack it is in.
+//
+// The file list alone was not enough. A Flutter project and a React Native
+// project both contain a main file and a package manifest; naming those files
+// still let a planner propose rewriting a Flutter app in React Native, because
+// nothing said which framework these files belong to. The marker files and the
+// dominant extension are what actually identify the stack.
 func (e *ContextEngine) BuildStructure() (string, error) {
 	files, err := e.ListSourceFiles()
 	if err != nil {
 		return "", err
 	}
+
 	var b strings.Builder
-	b.WriteString("Existing project files:\n")
+
+	// Language and framework markers are the strongest signal and are few, so
+	// they are listed before the general file list.
+	var markers []string
+	for _, m := range []struct{ rel, means string }{
+		{"pubspec.yaml", "a Flutter or Dart project"},
+		{"package.json", "a Node/npm project"},
+		{"tsconfig.json", "a TypeScript project"},
+		{"go.mod", "a Go project"},
+		{"Cargo.toml", "a Rust project"},
+		{"requirements.txt", "a Python project"},
+		{"pyproject.toml", "a Python project"},
+		{"setup.py", "a Python project"},
+		{"pom.xml", "a Java/Maven project"},
+		{"build.gradle", "a Java/Kotlin or Android project"},
+		{"settings.gradle", "a Gradle project"},
+		{"pubspec.lock", "a Dart/Flutter project"},
+		{"android", "an Android project"},
+		{"ios", "an iOS project"},
+		{"web", "a web target"},
+		{".dart_tool", "a Dart/Flutter project"},
+	} {
+		if _, statErr := os.Stat(filepath.Join(e.root, m.rel)); statErr == nil {
+			markers = append(markers, fmt.Sprintf("- %s  →  %s", m.rel, m.means))
+		}
+	}
+	if len(markers) > 0 {
+		b.WriteString("Project markers (this is what the project is built with):\n")
+		for _, m := range markers {
+			b.WriteString(m + "\n")
+		}
+	} else {
+		b.WriteString("Project markers: none found (this may be an empty or new project).\n")
+	}
+
+	// The dominant file extension is a second, independent signal.
+	counts := make(map[string]int)
 	for _, f := range files {
-		fmt.Fprintf(&b, "- %s (%d bytes)\n", f.RelPath, f.Size)
+		if ext := strings.ToLower(filepath.Ext(f.RelPath)); ext != "" {
+			counts[ext]++
+		}
+	}
+	if len(counts) > 0 {
+		type extCount struct {
+			ext string
+			n   int
+		}
+		var ranked []extCount
+		for ext, n := range counts {
+			ranked = append(ranked, extCount{ext, n})
+		}
+		sort.Slice(ranked, func(i, j int) bool { return ranked[i].n > ranked[j].n })
+		b.WriteString("\nLanguage by file count: ")
+		parts := make([]string, 0, 3)
+		for i, r := range ranked {
+			if i >= 3 {
+				break
+			}
+			parts = append(parts, fmt.Sprintf("%s (%d)", r.ext, r.n))
+		}
+		b.WriteString(strings.Join(parts, ", ") + "\n")
+	}
+
+	// The existing file list, bounded so a large repository cannot crowd out the
+	// markers above.
+	const maxListed = 120
+	b.WriteString("\nExisting project files:\n")
+	for i, f := range files {
+		if i >= maxListed {
+			fmt.Fprintf(&b, "- ... and %d more\n", len(files)-maxListed)
+			break
+		}
+		fmt.Fprintf(&b, "- %s\n", f.RelPath)
 	}
 	return b.String(), nil
 }

@@ -80,6 +80,11 @@ func (a *ArchitectAgent) BuildPlan(ctx context.Context, sCtx *SwarmContext) (*do
 			userPrompt += fmt.Sprintf("\n\nArchitect blueprint for context:\n%s", string(bp))
 		}
 	}
+	// The planner must see what the project already is. Without this it planned a
+	// brand-new stack from the request alone — a React Native app was proposed
+	// inside a Flutter project — and every downstream task was built on that
+	// wrong premise.
+	userPrompt += existingStructureBrief(sCtx)
 
 	resp, err := a.llmClient.Generate(ctx, llm.Request{
 		Model:        cleanModel,
@@ -215,4 +220,26 @@ func LogPlanOutcome(source string, plan *domain.ProjectPlan, err error) {
 	case plan != nil:
 		log.Printf("project plan via %s: %d tasks, goal %q", source, len(plan.Tasks), plan.Goal)
 	}
+}
+// existingStructureBrief tells a planner what the project already is.
+//
+// This was the cause of a hallucinated tech stack: asked for a Duolingo clone in
+// a Flutter project, the planner returned a 30-task React Native plan because it
+// had never seen the files. It only ever looked at the request text.
+//
+// Both planners use it — the built-in architect and a custom team's designer —
+// because the failure has nothing to do with which agent is planning.
+func existingStructureBrief(sCtx *SwarmContext) string {
+	if sCtx == nil || sCtx.WorkspacePath == "" {
+		return ""
+	}
+	engine := NewContextEngine(sCtx.WorkspacePath)
+	structure, err := engine.BuildStructure()
+	if err != nil || strings.TrimSpace(structure) == "" {
+		return ""
+	}
+	return "\n\n--- EXISTING PROJECT STRUCTURE ---\n" + structure +
+		"\n\n(CRITICAL: this project already exists in the language and framework shown above. " +
+		"The work list MUST build on that existing stack. Do not propose a rewrite in a different " +
+		"language or framework, and do not plan files whose language contradicts the project.)"
 }

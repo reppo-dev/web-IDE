@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -182,5 +183,76 @@ func TestIsViewableFile(t *testing.T) {
 		if got := IsViewableFile(tc.path); got != tc.want {
 			t.Errorf("IsViewableFile(%q) = %v, want %v", tc.path, got, tc.want)
 		}
+	}
+}
+
+// TestBuildStructureIdentifiesTheStack covers a real failure: asked for a
+// Duolingo clone inside a Flutter project, the planner proposed React Native.
+// The file names were sent, but nothing said which framework they belonged to, so
+// the stack was still a guess.
+func TestBuildStructureIdentifiesTheStack(t *testing.T) {
+	root := t.TempDir()
+
+	// A Flutter project: the same shape of files a React Native project has,
+	// plus the marker that actually identifies it.
+	writeContextTestFile(t, root, "pubspec.yaml", "name: first_app\ndependencies:\n  flutter:\n    sdk: flutter\n")
+	writeContextTestFile(t, root, "lib/main.dart", "void main() {}")
+	writeContextTestFile(t, root, "lib/models/lesson.dart", "class Lesson {}")
+	writeContextTestFile(t, root, "test/widget_test.dart", "void main() {}")
+
+	engine := NewContextEngine(root)
+	structure, err := engine.BuildStructure()
+	if err != nil {
+		t.Fatalf("BuildStructure: %v", err)
+	}
+
+	// pubspec.yaml must be named as the marker that identifies the stack.
+	if !strings.Contains(structure, "pubspec.yaml") {
+		t.Errorf("structure does not mention the Flutter marker:\n%s", structure)
+	}
+	if !strings.Contains(structure, "Flutter") {
+		t.Errorf("structure does not identify the project as Flutter:\n%s", structure)
+	}
+	// The dominant language must be stated, so a planner cannot infer Dart from
+	// a file called main.dart.
+	if !strings.Contains(structure, ".dart") {
+		t.Errorf("structure does not report the dominant language:\n%s", structure)
+	}
+}
+
+// TestBuildStructureSaysWhenItCannotTell guards the honest case: an empty
+// project must not be described as though it had a known stack.
+func TestBuildStructureSaysWhenItCannotTell(t *testing.T) {
+	root := t.TempDir()
+	engine := NewContextEngine(root)
+
+	structure, err := engine.BuildStructure()
+	if err != nil {
+		t.Fatalf("BuildStructure: %v", err)
+	}
+	if !strings.Contains(structure, "none found") {
+		t.Errorf("an empty project should say it has no markers:\n%s", structure)
+	}
+}
+
+// TestBuildStructureBoundsLongLists keeps a large repository from crowding out
+// the markers, which are the part that matters.
+func TestBuildStructureBoundsLongLists(t *testing.T) {
+	root := t.TempDir()
+	writeContextTestFile(t, root, "go.mod", "module example.com/app\n")
+	for i := 0; i < 200; i++ {
+		writeContextTestFile(t, root, fmt.Sprintf("pkg/file%03d.go", i), "package pkg\n")
+	}
+
+	structure, err := NewContextEngine(root).BuildStructure()
+	if err != nil {
+		t.Fatalf("BuildStructure: %v", err)
+	}
+	if !strings.Contains(structure, "and 80 more") {
+		t.Errorf("long file list should be truncated and counted:\n%s", structure[:min(len(structure), 400)])
+	}
+	// The marker must survive the truncation, since it is the whole point.
+	if !strings.Contains(structure, "Go project") {
+		t.Errorf("the stack marker was lost to truncation:\n%s", structure[:min(len(structure), 400)])
 	}
 }

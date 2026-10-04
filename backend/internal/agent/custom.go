@@ -516,13 +516,9 @@ func (c *CustomAgent) BuildPlan(ctx context.Context, sCtx *SwarmContext) (*domai
 	}
 
 	userPrompt := fmt.Sprintf("Project request: %s%s", sCtx.UserPrompt, designerBrief)
-	if sCtx.WorkspacePath != "" {
-		engine := NewContextEngine(sCtx.WorkspacePath)
-		if structure, err := engine.BuildStructure(); err == nil && structure != "" {
-			userPrompt += "\n\n--- EXISTING PROJECT STRUCTURE ---\n" + structure
-			userPrompt += "\n(CRITICAL: The project is already initialized in the language and framework shown above. Your task plan MUST strictly build upon and stay within this existing framework and language. Do not propose rewriting in a different tech stack.)\n"
-		}
-	}
+	// Shared with the built-in architect: both planners must see the existing
+	// project, or they invent a stack the project does not use.
+	userPrompt += existingStructureBrief(sCtx)
 	if sCtx.Blueprint != nil && len(sCtx.Blueprint.FileTree) > 0 {
 		userPrompt += "\n\nFiles already planned:\n" + strings.Join(sCtx.Blueprint.FileTree, "\n")
 	}
