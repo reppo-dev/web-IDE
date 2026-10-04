@@ -106,6 +106,51 @@ func TestSafeReadPath(t *testing.T) {
 	if _, err := SafeReadPath(root, "../outside"); err == nil {
 		t.Error("expected error for traversal attempt")
 	}
+
+	// 5. Secret files must be blocked (PROJECT_VISION §25)
+	envPath := filepath.Join(root, ".env")
+	if err := os.WriteFile(envPath, []byte("API_KEY=secret"), 0o600); err != nil {
+		t.Fatalf("failed to create .env: %v", err)
+	}
+	if _, err := SafeReadPath(root, ".env"); err == nil {
+		t.Error("expected SafeReadPath to reject .env")
+	}
+}
+
+func TestIsSecretPath(t *testing.T) {
+	secrets := []string{
+		".env",
+		".env.local",
+		".env.production",
+		"sub/.env.staging",
+		"id_rsa",
+		"id_ed25519",
+		"server.key",
+		"cert.pem",
+		".npmrc",
+		".pypirc",
+		"credentials.json",
+		"service-account-key.json",
+	}
+	for _, s := range secrets {
+		if !IsSecretPath(s) {
+			t.Errorf("expected IsSecretPath(%q) to be true", s)
+		}
+	}
+
+	allowed := []string{
+		"main.go",
+		"environment.ts",
+		"keys_util.go",
+		"config.json",
+		"lib/main.dart",
+		"package.json",
+	}
+	for _, a := range allowed {
+		if IsSecretPath(a) {
+			t.Errorf("expected IsSecretPath(%q) to be false", a)
+		}
+	}
 }
 
 func TestRelPath(t *testing.T) {

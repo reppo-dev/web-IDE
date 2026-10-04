@@ -11,6 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/nexusai/nexusai/backend/internal/domain"
+	"github.com/nexusai/nexusai/backend/internal/llm"
 	"github.com/nexusai/nexusai/backend/internal/memory"
 	"github.com/nexusai/nexusai/backend/internal/orchestrator"
 	"github.com/nexusai/nexusai/backend/internal/skills"
@@ -58,13 +59,14 @@ func NewWSServer(orch *orchestrator.Orchestrator, mem memory.MemoryStore, sm *sk
 	}
 }
 
-// reply sends a JSON response to one client.
+// reply sends a JSON response to one client, redacting any secrets (PROJECT_VISION §25).
 func reply(conn *websocket.Conn, payload interface{}) {
 	b, err := json.Marshal(payload)
 	if err != nil {
 		return
 	}
-	_ = conn.WriteMessage(websocket.TextMessage, b)
+	redacted := llm.RedactSecrets(string(b))
+	_ = conn.WriteMessage(websocket.TextMessage, []byte(redacted))
 }
 
 // resolveTeam finds the team a project should use: the explicit request wins,
@@ -99,7 +101,8 @@ func (s *WSServer) Start(ctx context.Context) {
 				}
 				bytes, err := json.Marshal(evt)
 				if err == nil {
-					s.broadcast <- bytes
+					redacted := llm.RedactSecrets(string(bytes))
+					s.broadcast <- []byte(redacted)
 				}
 			}
 		}

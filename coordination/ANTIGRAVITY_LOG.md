@@ -3,6 +3,35 @@
 > این فایل متعلق به ایجنت Antigravity است.
 > اگر Claude اینجا را خواند، **دست به آن نزنید** — فقط بخوانید تا بدانید چه کرده.
 
+## ۲۰۲۶-۱۰-۰۴ ۰۸:۰۸ — حفاظت و سانسور اسرار (بند ۲۵) + سقف Rework=3 و تشخیص تکرار خطا (بند ۱۹) با همکاری کلود
+
+۱. **ممانعت از خواندن فایل‌های محرمانه (`backend/internal/workspace/guard.go` & `context.go`):**
+   - تابع `IsSecretPath` برای تشخیص فایل‌های حساس (`.env*`, `id_rsa*`, `*.pem`, `*.key`, `credentials.json`, `.npmrc` و غیره) پیاده شد.
+   - متد `SafeReadPath` در صورت درخواست خواندن این فایل‌ها خطای صریح `ErrSecretAccess` برمی‌گرداند.
+   - `ContextEngine.ListSourceFiles` فایل‌های محرمانه را از اسکن سورس پروژه فیلتر و رد می‌کند.
+   - تست‌های جامع در `guard_test.go` پاس شدند.
+
+۲. **سانسور و پنهان‌سازی خودکار اسرار (`backend/internal/llm/sanitize.go`):**
+   - توابع `RedactSecrets`، `RedactSlice` و `MaskKey` بر اساس رجکس‌های دقیق انواع توکن‌ها (OpenAI, Anthropic, Bearer, NineRouter, Google AI, GitHub PAT, AWS Key, Private Keys, URL credentials) نوشته و تست شدند.
+   - اعمال شد بر روی خروجی‌های برودکست و ریپلای‌های وب‌سوکت در `backend/api/ws_server.go`.
+
+۳. **سقف سخت Rework و تشخیص خطای تکراری (`domain/team.go` & `agent/agent.go`):**
+   - افزودن `ReworkCount` و `LastError` به ساختار `ProjectTask`.
+   - متد `SendTaskBackToRework(reason ...string)` بازنویسی شد: حداکثر ۳ دور تلاش مجدد اجازه داده می‌شود؛ در صورت ۳ تلاش ناموفق یا تکرار خطای یکسان در ۲ ری‌ورک پیاپی، تسک مستقیماً به `WAITING_FOR_HUMAN` ارتقا می‌یابد تا از هدررفت بودجه و چرخه بی‌پایان جلوگیری شود.
+   - اصلاح تست‌های `agent_test.go` و پاس شدن ۱۰۰٪.
+
+۴. **هم‌افزایی با کدهای جدید کلود (`progress.go`, `escalation_test.go`, `plan_store.go`):**
+   - رفع خطای کامپایل جاافتادن ایمپورت `"fmt"` در `progress.go`.
+   - تنظیم شرط `plan.Completed()` در `plan_loop_test.go` هماهنگ با متدهای جدید `Settled()` و `Completed()` در `domain.ProjectPlan`.
+   - تمام تست‌های ارکستریتور و تست‌های جدید کلود (`escalation_test.go`) پاس شدند.
+
+۵. **سلامت کامل مخزن:**
+   - تمام ۱۲ پکیج Go بک‌اند با `go test -count=1 ./internal/... ./api/...` در ۱۱ ثانیه ۱۰۰٪ سبز شدند.
+   - دستور `go vet ./...` با ۰ خطا و اخطار تأیید شد.
+   - دیمون باینری جدید `nexusd.exe` مجدداً کامپایل و روی پورت ۸۰۸۰ لایو شد.
+
+---
+
 ## ۲۰۲۶-۱۰-۰۴ ۰۷:۴۲ — اتصال زنده Change Ledger (§30) و تاریخچه کامیت‌ها به UI (سایدبار Source Control)
 
 ۱. **به‌روزرسانی بک‌اند (`backend/internal/workspace/project_brain.go`):**

@@ -69,11 +69,47 @@ func SafePath(root, candidate string) (string, error) {
 	return full, nil
 }
 
+// ErrSecretAccess is returned when an agent attempts to access sensitive files.
+var ErrSecretAccess = fmt.Errorf("access denied: reading secret or credential files is forbidden (PROJECT_VISION §25)")
+
+// IsSecretPath reports whether a file path points to secrets or credentials
+// that must never be read by or leaked to agents (PROJECT_VISION §25).
+func IsSecretPath(path string) bool {
+	clean := filepath.ToSlash(strings.TrimSpace(path))
+	if clean == "" {
+		return false
+	}
+	base := strings.ToLower(filepath.Base(clean))
+	// .env and its variants (.env.local, .env.production, etc.)
+	if strings.HasPrefix(base, ".env") {
+		return true
+	}
+	// SSH and cryptographic keys
+	if strings.Contains(base, "id_rsa") || strings.Contains(base, "id_ecdsa") || strings.Contains(base, "id_ed25519") {
+		return true
+	}
+	ext := strings.ToLower(filepath.Ext(base))
+	if ext == ".pem" || ext == ".key" || ext == ".p12" || ext == ".pfx" || ext == ".keystore" {
+		return true
+	}
+	// Package manager credentials and cloud service tokens
+	if base == ".npmrc" || base == ".pypirc" || base == ".netrc" || base == "credentials.json" {
+		return true
+	}
+	if strings.HasPrefix(base, "service-account") && ext == ".json" {
+		return true
+	}
+	return false
+}
+
 // SafeReadPath is SafePath plus an existence check, for reading files.
 func SafeReadPath(root, candidate string) (string, error) {
 	full, err := SafePath(root, candidate)
 	if err != nil {
 		return "", err
+	}
+	if rel, err := RelPath(root, full); err == nil && IsSecretPath(rel) {
+		return "", fmt.Errorf("%w: %s", ErrSecretAccess, candidate)
 	}
 	info, err := statFile(full)
 	if err != nil {

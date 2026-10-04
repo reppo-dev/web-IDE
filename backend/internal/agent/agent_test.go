@@ -216,3 +216,92 @@ func TestAgentSwarmPersonas(t *testing.T) {
 		t.Errorf("expected positive score, got %.2f", sCtx.ArbiterVerdict.FinalScore)
 	}
 }
+
+func TestSendTaskBackToRework_Escalation(t *testing.T) {
+	sCtx := testContext("Build service")
+	sCtx.SetPlan(&domain.ProjectPlan{
+		Goal: "Test rework cap",
+		Tasks: []domain.ProjectTask{
+			{ID: "t-1", Title: "Task 1", State: domain.TaskTodo},
+		},
+	})
+
+	// 1st attempt
+	task := sCtx.NextTask()
+	if task == nil {
+		t.Fatal("expected task")
+	}
+	sCtx.SendTaskBackToRework("compile error on line 10")
+	plan := sCtx.PlanSnapshot()
+	if plan.Tasks[0].State != domain.TaskRework || plan.Tasks[0].ReworkCount != 1 {
+		t.Fatalf("attempt 1: got state %s, rework count %d", plan.Tasks[0].State, plan.Tasks[0].ReworkCount)
+	}
+
+	// 2nd attempt with different error -> still REWORK
+	task = sCtx.NextTask()
+	if task == nil {
+		t.Fatal("expected task")
+	}
+	sCtx.SendTaskBackToRework("test failed on TestFoo")
+	plan = sCtx.PlanSnapshot()
+	if plan.Tasks[0].State != domain.TaskRework || plan.Tasks[0].ReworkCount != 2 {
+		t.Fatalf("attempt 2: got state %s, rework count %d", plan.Tasks[0].State, plan.Tasks[0].ReworkCount)
+	}
+
+	// 3rd attempt with different error -> still REWORK
+	task = sCtx.NextTask()
+	if task == nil {
+		t.Fatal("expected task")
+	}
+	sCtx.SendTaskBackToRework("another error")
+	plan = sCtx.PlanSnapshot()
+	if plan.Tasks[0].State != domain.TaskRework || plan.Tasks[0].ReworkCount != 3 {
+		t.Fatalf("attempt 3: got state %s, rework count %d", plan.Tasks[0].State, plan.Tasks[0].ReworkCount)
+	}
+
+	// 4th attempt -> exceeds MaxReworkAttempts (3) -> escalates to WAITING_FOR_HUMAN
+	task = sCtx.NextTask()
+	if task == nil {
+		t.Fatal("expected task")
+	}
+	sCtx.SendTaskBackToRework("yet another error")
+	plan = sCtx.PlanSnapshot()
+	if plan.Tasks[0].State != domain.TaskWaiting || plan.Tasks[0].ReworkCount != 4 {
+		t.Fatalf("attempt 4: expected WAITING_FOR_HUMAN, got state %s (count %d)", plan.Tasks[0].State, plan.Tasks[0].ReworkCount)
+	}
+}
+
+func TestSendTaskBackToRework_RepeatedErrorEscalation(t *testing.T) {
+	sCtx := testContext("Build service")
+	sCtx.SetPlan(&domain.ProjectPlan{
+		Goal: "Test repeated error escalation",
+		Tasks: []domain.ProjectTask{
+			{ID: "t-1", Title: "Task 1", State: domain.TaskTodo},
+		},
+	})
+
+	// 1st attempt fails with error X -> Rework 1
+	sCtx.NextTask()
+	sCtx.SendTaskBackToRework("missing dependency: libsqlite3")
+	plan := sCtx.PlanSnapshot()
+	if plan.Tasks[0].State != domain.TaskRework {
+		t.Fatalf("attempt 1: got state %s", plan.Tasks[0].State)
+	}
+
+	// 2nd attempt fails with the EXACT same error X -> Rework 2
+	sCtx.NextTask()
+	sCtx.SendTaskBackToRework("missing dependency: libsqlite3")
+	plan = sCtx.PlanSnapshot()
+	if plan.Tasks[0].State != domain.TaskRework {
+		t.Fatalf("attempt 2: got state %s", plan.Tasks[0].State)
+	}
+
+	// 3rd attempt fails with the EXACT same error X again -> immediate escalation to WAITING_FOR_HUMAN
+	sCtx.NextTask()
+	sCtx.SendTaskBackToRework("missing dependency: libsqlite3")
+	plan = sCtx.PlanSnapshot()
+	if plan.Tasks[0].State != domain.TaskWaiting {
+		t.Fatalf("attempt 3 with repeated error: expected WAITING_FOR_HUMAN, got %s", plan.Tasks[0].State)
+	}
+}
+

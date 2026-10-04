@@ -55,13 +55,34 @@ type AgentSpec struct {
 type TaskState string
 
 const (
-	TaskTodo      TaskState = "TODO"
+	TaskTodo       TaskState = "TODO"
 	TaskInProgress TaskState = "IN_PROGRESS"
-	TaskDone      TaskState = "DONE"
-	TaskBlocked   TaskState = "BLOCKED"
-	TaskRework    TaskState = "REWORK"
-	TaskWaiting   TaskState = "WAITING_FOR_HUMAN"
+	TaskDone       TaskState = "DONE"
+	TaskBlocked    TaskState = "BLOCKED"
+	TaskRework     TaskState = "REWORK"
+	TaskWaiting    TaskState = "WAITING_FOR_HUMAN"
+	// TaskCancelled and TaskFailed are terminal states from the project's point
+	// of view: the swarm will not return to them. They exist so a task the user
+	// dropped, or one abandoned after repeated failure, is recorded as settled
+	// rather than left looking like outstanding work forever.
+	TaskCancelled TaskState = "CANCELLED"
+	TaskFailed    TaskState = "FAILED"
 )
+
+// Settled reports whether a task needs no further work from the swarm.
+//
+// DONE is the success case. WAITING_FOR_HUMAN and BLOCKED are cases the agents
+// have already failed to close and a person must now decide about. CANCELLED and
+// FAILED are terminal. None of the four may keep the project open, because the
+// swarm cannot make progress on any of them and would otherwise loop forever.
+func (t TaskState) Settled() bool {
+	switch t {
+	case TaskDone, TaskWaiting, TaskBlocked, TaskCancelled, TaskFailed:
+		return true
+	default:
+		return false
+	}
+}
 
 // ProjectTask is one item on the project's plan.
 type ProjectTask struct {
@@ -71,8 +92,10 @@ type ProjectTask struct {
 	State       TaskState `json:"state"`
 	// Files records what this task touched, so a later round can tell whether
 	// the work was actually carried out or merely re-scored.
-	Files []string `json:"files,omitempty"`
-	Round int      `json:"round,omitempty"`
+	Files       []string  `json:"files,omitempty"`
+	Round       int       `json:"round,omitempty"`
+	ReworkCount int       `json:"rework_count,omitempty"`
+	LastError   string    `json:"last_error,omitempty"`
 }
 
 // ProjectPlan is the ordered list of work that makes the project complete.
@@ -117,8 +140,52 @@ func (p *ProjectPlan) OpenTasks() []ProjectTask {
 // AllDone reports whether the whole plan is finished. An empty plan is not
 // complete: without a plan the system has no evidence the project is finished.
 func (p *ProjectPlan) AllDone() bool {
-	done, total, _ := p.Progress()
-	return total > 0 && done == total
+	if p == nil || len(p.Tasks) == 0 {
+		return false
+	}
+	// A task parked as WAITING_FOR_HUMAN or BLOCKED is not something the swarm
+	// can close on its own, so it must not hold the whole run open forever.
+	// Counting it as settled is what lets the rest of the project finish and
+	// leaves the user a short list of what is left, instead of the loop
+	// spinning on one task the agents have already failed three times.
+	for _, t := range p.Tasks {
+		if !t.State.Settled() {
+			return false
+		}
+	}
+	return true
+}
+
+// Completed reports whether every task actually passed verification.
+//
+// This is deliberately stricter than AllDone. A project can be settled with
+// work still outstanding, which is a finished run; it is only "complete" when
+// nothing is outstanding at all.
+func (p *ProjectPlan) Completed() bool {
+	if p == nil || len(p.Tasks) == 0 {
+		return false
+	}
+	for _, t := range p.Tasks {
+		if t.State != TaskDone {
+			return false
+		}
+	}
+	return true
+}
+
+// Outstanding lists the tasks the swarm did not finish, so a run that ends can
+// tell the user precisely what is left instead of only saying "not done".
+func (p *ProjectPlan) Outstanding() []ProjectTask {
+	if p == nil {
+		return nil
+	}
+	var out []ProjectTask
+	for _, t := range p.Tasks {
+		if t.State != TaskDone && t.State != TaskCancelled {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // Team is a named, reusable group of agents.

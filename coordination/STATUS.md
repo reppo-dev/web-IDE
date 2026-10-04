@@ -66,6 +66,8 @@ IDE چند-ایجنتی که ایجنت‌های هوش مصنوعی با هم �
 | **تأییدیه تست‌ها (۱۲ پکیج Go ۱۰۰٪ سبز + بیلد فرانت‌اند تمیز)** | کامل — Antigravity |
 | **اتصال Plan-Driven Loop به Custom Teams (`RunTeam`)** | کامل — Claude & Antigravity |
 | **تزریق تسک فعال به کانتکست کدنویس‌ها و بازبین‌ها (`activeTaskBrief`)** | کامل — Claude & Antigravity |
+| **سقف سخت Rework = ۳ و تشخیص تکرار خطا + ارتقا به `WAITING_FOR_HUMAN` (بند ۱۹)** | کامل — Claude & Antigravity |
+| **حفاظت و سانسور اسرار و توکن‌ها (`RedactSecrets` + `SafeReadPath` — بند ۲۵)** | کامل — Antigravity & Claude |
 
 ---
 

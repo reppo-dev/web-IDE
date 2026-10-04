@@ -171,25 +171,34 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 
 		task := sCtx.NextTask()
 
-		// No task available and none open means the plan is finished. The
-		// verifier is the only thing that can mark a task done, so reaching here
-		// means every task passed its own gate.
+		// No task can be selected, so the swarm has nothing left it can do on
+		// its own. The plan distinguishes two endings that used to look
+		// identical from the outside.
 		if task == nil {
+			plan := sCtx.PlanSnapshot()
+			o.persistPlan(sCtx, ws)
+
 			if sCtx.AllTasksDone() {
+				// Everything either passed verification or was escalated, so the
+				// run is over. Which of those happened is stated plainly: a run
+				// that quietly mixed the two would report success on a project
+				// that is visibly unfinished.
+				report := describeRunEnd(plan)
 				o.broadcast(SwarmEvent{
 					Type:      EventConsensusReached,
 					ProjectID: projectID,
 					Round:     sCtx.Round,
 					Verdict:   sCtx.ArbiterVerdict,
 					Files:     sCtx.CodeFiles,
-					Payload:   fmt.Sprintf("All %d tasks verified complete.", len(sCtx.PlanSnapshot().Tasks)),
+					Payload:   report,
 				})
-				o.persistPlan(sCtx, ws)
+				log.Printf("run finished: %s", report)
 				return sCtx, nil
 			}
-			// Tasks remain but none can be selected: every remaining one is
-			// blocked and waiting on a human.
-			o.persistPlan(sCtx, ws)
+
+			// Still open tasks that NextTask will not hand out, which should not
+			// be reachable, but reporting beats spinning.
+			log.Printf("run ended with %d unselectable tasks remaining", len(plan.OpenTasks()))
 			return sCtx, nil
 		}
 
@@ -279,7 +288,7 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 			if verdict.Passed {
 				sCtx.CompleteTask(touched)
 			} else {
-				sCtx.SendTaskBackToRework()
+				sCtx.SendTaskBackToRework(verdict.Summary)
 			}
 			o.broadcast(SwarmEvent{
 				Type:      EventPlanUpdated,

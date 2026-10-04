@@ -2,6 +2,17 @@
 
 > **قانون: اگر فایلی اینجا رزرو شده، دست به آن نمی‌زنید.**
 > اگر فایلی که می‌خواهید تغییر دهید اینجاست، منتظر بمانید یا فایل دیگری بردارید.
+### ✅ Claude & Antigravity — ۲۰۲۶-۱۰-۰۴ ۰۸:۰۸ (تمام شد)
+- `backend/internal/workspace/guard.go` & `guard_test.go` — ممانعت قطعی از خواندن فایل‌های اسرار (.env، کلیدها، توکن‌ها طبق بند ۲۵)
+- `backend/internal/workspace/context.go` — رد کردن خودکار فایل‌های محرمانه در پیمایش Context Engine
+- `backend/internal/llm/sanitize.go` & `sanitize_test.go` — ماژول جامع سانسور خودکار کلیدهای API و اسرار (RedactSecrets طبق بند ۲۵)
+- `backend/internal/domain/team.go` — فیلدهای ReworkCount و LastError و متدهای AllDone / Completed / Settled
+- `backend/internal/agent/agent.go` & `agent_test.go` — اعمال سقف سخت ۳ بار Rework + تشخیص تکرار خطا و ارتقا خودکار به WAITING_FOR_HUMAN (بند ۱۹)
+- `backend/internal/orchestrator/progress.go` & `escalation_test.go` — گزارش جامع پایان کار و تست‌های کامل جلوگیری از بلاک شدن پلن
+- `backend/api/ws_server.go` — سانسور خودکار اسرار قبل از برودکست وب‌سوکت
+
+**نتیجه:** بندهای ۱۹ (سقف Rework و تشخیص تکرار خطا) و ۲۵ (حفاظت و سانسور اسرار) سند ویژن ۲.۰ به طور کامل پیاده‌سازی و تست شدند. تمام ۱۲ پکیج Go بک‌اند ۱۰۰٪ سبز هستند. باینری nexusd.exe کامپایل و روی پورت ۸۰۸۰ لایو است. تمام فایل‌ها آزاد هستند.
+
 ### ✅ Antigravity — ۲۰۲۶-۱۰-۰۴ ۰۷:۴۲ (تمام شد)
 - `backend/internal/workspace/project_brain.go` — پشتیبانی ReadLedger از تمام ورودی‌های لجر (تغییر فایل و رویدادهای کامیت)
 - `frontend/src/types.ts` — تعریف ChangeLedgerEntry و TestLedgerRecord در تایپ‌های فرانت‌اند

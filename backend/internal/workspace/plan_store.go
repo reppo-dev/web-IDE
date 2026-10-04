@@ -109,7 +109,25 @@ func (b *BrainFS) RenderTasks(plan *domain.ProjectPlan) error {
 		if len(t.Files) > 0 {
 			sb.WriteString(fmt.Sprintf("\n  - Files: %s", strings.Join(t.Files, ", ")))
 		}
+		// A task handed back to a human has to say why, or the next person has
+		// no way to tell which of the failures were the same one.
+		if t.LastError != "" {
+			sb.WriteString(fmt.Sprintf("\n  - Needs attention: %s", t.LastError))
+		}
+		if t.ReworkCount > 0 {
+			sb.WriteString(fmt.Sprintf("\n  - Attempts: %d", t.ReworkCount+1))
+		}
 		sb.WriteString("\n")
+	}
+
+	// Anything still open is listed separately, because that list is the whole
+	// point of stopping: it is what the user has to decide about.
+	if open := plan.Outstanding(); len(open) > 0 {
+		sb.WriteString(fmt.Sprintf("\n## Still open (%d)\n\n", len(open)))
+		sb.WriteString("The team finished everything it could on its own. These need a decision:\n\n")
+		for _, t := range open {
+			sb.WriteString(fmt.Sprintf("- **%s** %s — %s\n", t.ID, t.Title, t.State))
+		}
 	}
 
 	return os.WriteFile(filepath.Join(b.dir, FileTasks), []byte(sb.String()), 0644)

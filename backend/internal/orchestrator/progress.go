@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -94,6 +95,56 @@ func (w *progressWatcher) record(sCtx *agent.SwarmContext) bool {
 		identical++
 	}
 	return identical >= w.stuckRounds
+}
+
+// describeRunEnd states plainly how a run finished and what is still open.
+//
+// This is the report the user actually reads. One stuck task used to be able to
+// hold the entire project open, so the run never ended and the remaining work was
+// never listed anywhere. Now the rest of the plan is always carried through, and
+// whatever could not be finished is named with the reason it stopped — so the
+// next step is obvious instead of guessed at.
+func describeRunEnd(plan *domain.ProjectPlan) string {
+	if plan == nil || len(plan.Tasks) == 0 {
+		return "The run ended without a work list, so its completion cannot be confirmed."
+	}
+
+	if plan.Completed() {
+		return fmt.Sprintf("Project complete: all %d tasks passed verification against the real code.",
+			len(plan.Tasks))
+	}
+
+	outstanding := plan.Outstanding()
+	if len(outstanding) == 0 {
+		return "The run ended with every task either finished or cancelled."
+	}
+
+	var done, escalated int
+	for _, t := range plan.Tasks {
+		switch t.State {
+		case domain.TaskDone:
+			done++
+		case domain.TaskWaiting, domain.TaskBlocked, domain.TaskFailed:
+			escalated++
+		}
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Run finished, but %d of %d tasks are still open. ", len(outstanding), len(plan.Tasks))
+	fmt.Fprintf(&sb, "%d task(s) passed verification; %d could not be closed by the team and need your decision.\n\n",
+		done, escalated)
+	sb.WriteString("What is left:\n")
+	for _, t := range outstanding {
+		fmt.Fprintf(&sb, "  [%s] %s — %s\n", t.State, t.ID, t.Title)
+		if t.Acceptance != "" {
+			fmt.Fprintf(&sb, "      done when: %s\n", t.Acceptance)
+		}
+		if t.LastError != "" {
+			fmt.Fprintf(&sb, "      last problem: %s\n", t.LastError)
+		}
+	}
+	sb.WriteString("\nThese remain on the task board, so a later run picks up exactly where this one stopped.")
+	return sb.String()
 }
 
 // snapshotOf fingerprints the round's real output.

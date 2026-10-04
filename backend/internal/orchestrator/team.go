@@ -168,7 +168,7 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 				if taskVerdict.Passed {
 					sCtx.CompleteTask(touched)
 				} else {
-					sCtx.SendTaskBackToRework()
+					sCtx.SendTaskBackToRework(taskVerdict.Summary)
 				}
 				o.broadcast(SwarmEvent{
 					Type:    EventAgentOutput,

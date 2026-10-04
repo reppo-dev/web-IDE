@@ -98,6 +98,9 @@ func (e *ContextEngine) ListSourceFiles() ([]ProjectFile, error) {
 		if relErr != nil {
 			return nil
 		}
+		if IsSecretPath(rel) || IsSecretPath(path) {
+			return nil
+		}
 		found = append(found, ProjectFile{
 			RelPath: filepath.ToSlash(rel),
 			Size:    int(info.Size()),

@@ -221,9 +221,13 @@ func (s *SwarmContext) CompleteTask(files []string) {
 	s.ActiveTask = nil
 }
 
-// SendTaskBackToRework marks the active task as needing another attempt,
-// preserving the reason so the next round knows what went wrong.
-func (s *SwarmContext) SendTaskBackToRework() {
+// MaxReworkAttempts caps consecutive rework cycles before human escalation (PROJECT_VISION §19).
+const MaxReworkAttempts = 3
+
+// SendTaskBackToRework marks the active task as needing another attempt.
+// If the task reaches MaxReworkAttempts (3) or encounters repeated consecutive errors,
+// it escalates directly to WAITING_FOR_HUMAN (PROJECT_VISION §19).
+func (s *SwarmContext) SendTaskBackToRework(reason ...string) {
 	if s == nil {
 		return
 	}
@@ -233,12 +237,25 @@ func (s *SwarmContext) SendTaskBackToRework() {
 	if s.ActiveTask == nil || s.Plan == nil {
 		return
 	}
+	errStr := ""
+	if len(reason) > 0 {
+		errStr = strings.TrimSpace(reason[0])
+	}
 	for i := range s.Plan.Tasks {
 		if s.Plan.Tasks[i].ID != s.ActiveTask.ID {
 			continue
 		}
-		s.Plan.Tasks[i].State = domain.TaskRework
+		s.Plan.Tasks[i].ReworkCount++
 		s.Plan.Tasks[i].Round = s.Round
+
+		repeatedError := errStr != "" && s.Plan.Tasks[i].LastError == errStr
+		s.Plan.Tasks[i].LastError = errStr
+
+		if s.Plan.Tasks[i].ReworkCount > MaxReworkAttempts || (s.Plan.Tasks[i].ReworkCount >= 3 && repeatedError) {
+			s.Plan.Tasks[i].State = domain.TaskWaiting
+		} else {
+			s.Plan.Tasks[i].State = domain.TaskRework
+		}
 		break
 	}
 	s.ActiveTask = nil

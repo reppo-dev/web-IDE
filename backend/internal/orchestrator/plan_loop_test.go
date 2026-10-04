@@ -370,7 +370,7 @@ func TestVerificationFailureBlocksTaskCompletion(t *testing.T) {
 	if plan == nil {
 		t.Fatal("no plan")
 	}
-	if plan.AllDone() {
+	if plan.Completed() {
 		t.Error("plan reported complete even though the task never passed verification")
 	}
 
@@ -378,12 +378,12 @@ func TestVerificationFailureBlocksTaskCompletion(t *testing.T) {
 	// stopped it rather than finding a silently unfinished project.
 	blocked := false
 	for _, task := range plan.Tasks {
-		if task.State == domain.TaskBlocked || task.State == domain.TaskRework {
+		if task.State == domain.TaskBlocked || task.State == domain.TaskRework || task.State == domain.TaskWaiting {
 			blocked = true
 		}
 	}
 	if !blocked {
-		t.Errorf("expected the stuck task to be marked BLOCKED or REWORK, got states %v", taskStates(plan))
+		t.Errorf("expected the stuck task to be marked BLOCKED, REWORK or WAITING_FOR_HUMAN, got states %v", taskStates(plan))
 	}
 }
 

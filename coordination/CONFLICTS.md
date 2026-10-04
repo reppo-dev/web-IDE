@@ -11,19 +11,20 @@
 
 | بخش | وضعیت | واقعیت در کد |
 | :--- | :--- | :--- |
-| ۸ Project Brain | ⚠️ ناقص | `brain.go` وجود دارد ولی فایل‌های `.project/` روی دیسک ساخته نمی‌شوند |
+| ۸ Project Brain | ✅ کامل | فایل‌های `.project/` (`plan.json`, `tasks.md`, `ledger.jsonl`) روی دیسک ساخته می‌شوند |
 | ۱۰ Fact/Proposal/Decision | ⚠️ ناقص | `MemoryType`ها وجود دارند ولی `evidence` و `expires` ندارند |
 | ۱۷ Context Engine | ✅ ناقص-ولی-کار | فقط لایه ۱ (جست‌وجوی متنی). نه LSP، نه tree-sitter |
-| ۱۹ سقف rework = ۳ | ❌ **خلاف** | فقط `MaxRounds` از تیم خوانده می‌شود؛ سقف سخت وجود ندارد |
+| ۱۹ سقف rework = ۳ | ✅ کامل | سقف سخت ۳ بار Rework + تشخیص تکرار خطا و ارتقا خودکار به `WAITING_FOR_HUMAN` |
 | ۲۲ Checkpoint روی ref جدا | ❌ **خلاف** | commit مستقیم روی `main` در شاخه‌ی کاربر |
-| ۲۵ عدم خواندن `.env` | ❌ **خلاف** | `config.go:loadDotEnv()` فایل `.env` را می‌خواند |
-| ۲۵ redaction اسرار | ❌ وجود ندارد | اگر مدل کلیدی در پاسخ بگوید، در لاگ می‌رود |
-| ۲۶ سقف tool calls | ✅ | `ToolCallBudget` پیاده شده (پیش‌فرض ۱۲) |
-| ۲۶ سقف هزینه | ❌ وجود ندارد | فقط سقف تعداد فراخوانی، نه سقف توکن/دلار |
-| ۳۰ Change Ledger | ❌ وجود ندارد | هیچ `ledger.jsonl` نوشته نمی‌شود |
+| ۲۵ عدم خواندن `.env` | ✅ کامل | رد کردن خودکار `.env` و کلیدها در `SafeReadPath` و `ContextEngine` |
+| ۲۵ redaction اسرار | ✅ کامل | ماژول `RedactSecrets` برای پنهان‌سازی خودکار کلیدهای API و اسرار در وب‌سوکت و لاگ |
+| ۲۶ سقف tool calls | ✅ کامل | `ToolCallBudget` پیاده شده (پیش‌فرض ۱۲) |
+| ۲۶ سقف هزینه | ✅ کامل | `SessionBudget` و `ErrBudgetExhausted` با ارتقا به `WAITING_FOR_HUMAN` پیاده شد |
+| ۳۰ Change Ledger | ✅ کامل | لاگ تغییرات تغییرناپذیر در `.project/ledger.jsonl` + API + UI سایدبار |
 | ۳۱ Agent Memory | ⏸️ عمداً فاز ۲ | طبق سند درست است |
 | ۳۷ Observability / هزینه | ❌ ناقص | لاگ متنی هست، اما تفکیک هزینه به‌ازای Agent ندارد |
 | ۱۲ سقف نقد = ۲ دور | ➖ بی‌موضوع | ماتریس N-to-N حذف شده؛ `runRelayDiscussion` جایگزین شد |
+
 
 ---
 
