@@ -3,6 +3,21 @@
 > **قانون: اگر فایلی اینجا رزرو شده، دست به آن نمی‌زنید.**
 > اگر فایلی که می‌خواهید تغییر دهید اینجاست، منتظر بمانید یا فایل دیگری بردارید.
 
+### ✅ Claude & Antigravity — ۲۰۲۶-۱۰-۰۵ ۰۹:۵۰ (تمام شد)
+- **هدف:** کشف و رفع باگ ریشه‌ای عدم ثبت فایل‌های تیم در دیسک (ادغام ToolWriteFile در CodeFiles، رفع تنزل سطح دسترسی ابزارها به read-only، تشخیص تغییرات فایل بر اساس محتوا نه طول اسلایس)
+- **کلاد (Claude):**
+  - `backend/internal/orchestrator/parallel_tasks.go` & `parallel_tasks_test.go` — تشخیص دقیق تغییر فایل‌ها با متد `filesChangedSince` (مقایسه محتوایی به‌جای مقایسه طول اسلایس) و ۲ تست جامع
+  - `backend/internal/orchestrator/concurrent.go` & `loop.go` — استفاده از `CodeFilesSnapshot()` نخ‌امن به‌جای اسلایس خام
+- **آنتی‌گرویتی (Antigravity):**
+  - `backend/internal/agent/tools.go` & `tool_exec.go` & `tools_test.go` — ضبط خودکار فایل‌های نوشته‌شده با `ToolWriteFile` در `ToolExecutor.writtenFiles` و برگشت در `Result.WrittenFiles`
+  - `backend/internal/agent/custom.go` — ادغام `res.WrittenFiles` در `sCtx.CodeFiles`، رعایت `c.spec.ToolsAccess`، پیش‌فرض `AccessWrite` برای پیاده‌سازها، پشتیبانی از هر دو ساختار شیء و آرایه فایل
+  - `backend/internal/orchestrator/team.go` — تنظیم دسترسی ابزارهای تیم بر مبنای اعضای با دسترسی نوشتن
+  - `scripts/e2e-test.ps1` — لاگ دقیق استثناهای پارس JSON
+- **تمام ۱۲ پکیج Go بک‌اند ۱۰۰٪ سبز، بیلد فرانت‌اند در ۲.۴۲ ثانیه، دیمون لایو روی پورت ۸۰۸۰.**
+- **تمام فایل‌ها آزاد هستند.**
+
+---
+
 ### ✅ Antigravity — ۲۰۲۶-۱۰-۰۵ ۰۹:۱۸ (تمام شد)
 - **هدف:** پیاده‌سازی بند ۱۷ (Context Budget & Context Manifest) و هدایت تمرکز Context Engine بر مبنای Active Task + بند ۳۷ (ثبت Manifest کانتکست هر ایجنت برای خطایابی شفاف)
 - `backend/internal/workspace/context.go` & `context_test.go` — ساختار `ContextManifest`، متد `BuildCodeContextWithManifest`، متد `SelectRelevantFilesWithFocus` و تست‌های جامع

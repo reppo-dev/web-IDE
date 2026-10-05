@@ -3,6 +3,28 @@
 > این فایل متعلق به ایجنت Antigravity است.
 > اگر Claude اینجا را خواند، **دست به آن نزنید** — فقط بخوانید تا بدانید چه کرده.
 
+## ۲۰۲۶-۱۰-۰۵ ۰۹:۵۲ — کشف و رفع باگ ریشه‌ای عدم ثبت فایل‌های ابزاری تیم در دیسک + ادغام متد filesChangedSince کلاد + ۱۲ پکیج Go سبز
+
+۱. **کشف و رفع باگ ریشه‌ای در اجرای ابزارها و عدم ذخیره کدهای تولیدی تیم‌های دلخواه:**
+   - **علت ۱:** متد `ToolExecutor.writeFile` فایل‌ها را می‌نوشت، اما هیچ لیستی از فایل‌های ایجادشده در `ToolExecutor` نگهداری نمی‌شد. در نتیجه `Result.WrittenFiles` وجود نداشت و متد `executeWithTools` در `custom.go` فقط تلاش می‌کرد خروجی متنی مدل را به صورت `{"files": [...]}` پارس کند که طبیعتاً شکست می‌خورد و `sCtx.CodeFiles` با ۰ فایل باقی می‌ماند!
+     - **رفع:** فیلد `writtenFiles []domain.CodeFile` و متد `WrittenFiles()` به `ToolExecutor` اضافه شدند؛ متد `ToolLoop.Run` به صورت خودکار `out.WrittenFiles` را برمی‌گرداند؛ و `executeWithTools` بلافاصله فایل‌های تولیدی ابزارها را در `sCtx.MergeCodeFiles` ادغام می‌کند.
+   - **علت ۲:** در `CustomAgent.toolLoopFor`، دسترسی اختصاصی ایجنت (`c.spec.ToolsAccess`) نادیده گرفته می‌شد و چون تیم در سطح بالاتر فیلد را پر نکرده بود، همه ایجنت‌ها به صورت خودکار به `AccessReadOnly` تنزل می‌یافتند و ابزار `write_file` اصلاً ثبت نمی‌شد!
+     - **رفع:** `toolLoopFor` حالا `c.spec.ToolsAccess` را بررسی می‌کند و برای ایجنت‌های فاز `implement` یا نقش `coder` پیش‌فرض `AccessWrite` تعیین می‌کند. همچنین در `team.go` دسترسی ابزارهای تیم بر مبنای اعضای دارای دسترسی نوشتن تنظیم شد.
+   - **علت ۳:** تابع `commitResult` فقط ساختار شیء `{"files": [...]}` را پارس می‌کرد؛ پشتیبانی از آرایه مستقیم `[{"path": ...}]` نیز اضافه شد تا هر دو فرمت پوشش داده شوند.
+
+۲. **ادغام شاهکار کلاد در `parallel_tasks.go`:**
+   - کلاد باگ تشخیص تغییر فایل بر مبنای طول اسلایس (`touched[filesBefore:]`) را با متد `filesChangedSince` (مقایسه محتوایی فایل‌ها) برطرف کرد و دو تست اختصاصی نوشت.
+   - جایگزینی دسترسی‌های مستقیم به `CodeFiles` با متد Thread-Safe `CodeFilesSnapshot()`.
+
+۳. **نتایج راستی‌آزمایی:**
+   - تست‌های اختصاصی جدید `TestToolExecutorWrittenFilesTracked`، `TestFilesChangedSinceCoversRevisions` و `TestFilesChangedSinceIsEmptyWhenNothingHappened` ۱۰۰٪ پاس شدند.
+   - تمام ۱۲ پکیج Go با `go test -count=1 ./internal/... ./api/...` مجدداً ۱۰۰٪ سبز شدند.
+   - بیلد فرانت‌اند در ۲.۴۲ ثانیه بدون خطا کامپایل شد.
+   - باینری تازه `nexusd.exe` دوباره کامپایل و دیمون لایو روی پورت ۸۰۸۰ اجرا شد.
+   - کامیت تمیز `76f3e70` در گیت ثبت شد.
+
+---
+
 ## ۲۰۲۶-۱۰-۰۵ ۰۹:۲۰ — پیاده‌سازی کامل بند ۱۷ (Context Budget & Context Manifest) و بند ۳۷ (ثبت Manifest کانتکست هر ایجنت) + هدایت کانتکست بر اساس تسک فعال + ۱۲ پکیج Go سبز
 
 ۱. **پیاده‌سازی بند ۱۷ و ۳۷ سند ویژن (Context Budget & Context Manifest):**
