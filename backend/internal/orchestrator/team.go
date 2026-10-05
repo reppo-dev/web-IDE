@@ -59,6 +59,20 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 		ToolTimeout:    4 * time.Minute,
 		AgentModels:    make(map[domain.AgentRole]string),
 	}
+
+	// Load existing files from workspace if present on disk
+	if len(sCtx.CodeFilesSnapshot()) == 0 {
+		existingFiles, _ := ws.LoadFiles()
+		if len(existingFiles) > 0 {
+			sCtx.SetCodeFiles(existingFiles)
+			o.broadcast(SwarmEvent{
+				Type:      EventCodeUpdated,
+				ProjectID: projectID,
+				Round:     1,
+				Files:     existingFiles,
+			})
+		}
+	}
 	for _, spec := range specs {
 		if spec.Model != "" {
 			sCtx.AgentModels[spec.Role] = spec.Model

@@ -301,19 +301,25 @@ func (v *TaskVerifier) taskCode(task *domain.ProjectTask, sCtx *SwarmContext) st
 		}
 	}
 	if len(files) == 0 {
-		if sCtx.WorkspacePath != "" && len(task.Files) > 0 {
-			var diskFiles []domain.CodeFile
-			for _, f := range task.Files {
-				full := filepath.Join(sCtx.WorkspacePath, f)
-				if data, err := os.ReadFile(full); err == nil {
-					diskFiles = append(diskFiles, domain.CodeFile{
-						Path:    f,
-						Content: string(data),
-					})
+		if sCtx.WorkspacePath != "" {
+			if len(task.Files) > 0 {
+				var diskFiles []domain.CodeFile
+				for _, f := range task.Files {
+					full := filepath.Join(sCtx.WorkspacePath, f)
+					if data, err := os.ReadFile(full); err == nil {
+						diskFiles = append(diskFiles, domain.CodeFile{
+							Path:    f,
+							Content: string(data),
+						})
+					}
+				}
+				if len(diskFiles) > 0 {
+					return renderFiles(diskFiles)
 				}
 			}
-			if len(diskFiles) > 0 {
-				return renderFiles(diskFiles)
+			engine := NewContextEngine(sCtx.WorkspacePath)
+			if code, _, err := engine.BuildCodeContextWithManifest(task.Title, nil, 8); err == nil && code != "" {
+				return code
 			}
 		}
 		return "(the project currently contains no files)"

@@ -157,7 +157,7 @@ func NewOrchestrator(
 		arbiter:      arb,
 		memStore:     mem,
 		matrixEngine: matrix,
-		sandbox:      sandbox.NewRunner(10 * time.Second),
+		sandbox:      sandbox.NewRunner(30 * time.Second),
 		detector:     scoring.NewConvergenceDetector(3),
 		baseDir:      baseDir,
 		subscribers:  make([]chan SwarmEvent, 0),
