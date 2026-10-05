@@ -56,8 +56,12 @@ type SwarmEvent struct {
 	// TaskTitle labels the card. It travels with the event rather than being
 	// parsed back out of a step's prose, which broke the moment that sentence was
 	// reworded or translated.
-	TaskTitle string          `json:"task_title,omitempty"`
-	Stream    *TaskStreamStep `json:"stream,omitempty"`
+	TaskTitle string `json:"task_title,omitempty"`
+	// StreamAgent names the thread a step belongs to when it is more specific than
+	// the role. Parallel workers all share the coder role, so without this three
+	// concurrent coders would collapse into one conversation in the UI.
+	StreamAgent string          `json:"stream_agent,omitempty"`
+	Stream      *TaskStreamStep `json:"stream,omitempty"`
 	// StreamReset tells the client to start a fresh stream. A retried task needs
 	// this: its earlier attempts are history, not the current state of the work.
 	StreamReset bool `json:"stream_reset,omitempty"`
@@ -77,6 +81,9 @@ type TaskStreamStep struct {
 	TaskID string `json:"task_id"`
 	// Agent is who took this step.
 	Agent domain.AgentRole `json:"agent"`
+	// As names the specific thread when several agents share a role, which is the
+	// normal case in a parallel batch. Empty means the role is the identity.
+	As string `json:"as,omitempty"`
 	// Kind is the step type: thought, tool, edit, test, review, decision.
 	Kind string `json:"kind"`
 	// Text is the human-readable content of the step.

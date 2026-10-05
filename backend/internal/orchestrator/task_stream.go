@@ -136,3 +136,55 @@ func (o *Orchestrator) broadcastLocks(sCtx *agent.SwarmContext, projectID string
 		Locks:     locks,
 	})
 }
+
+// The "As" variants carry the worker's own name rather than a bare role.
+//
+// Under a parallel batch several agents share the coder role, and a UI that
+// groups its threads by agent would otherwise collapse three working agents into
+// one conversation — hiding exactly the parallelism the user asked to see. The
+// worker name is what keeps them apart.
+
+// taskStepAs appends a step attributed to a named worker.
+func (o *Orchestrator) taskStepAs(projectID string, round int, taskID string, actor domain.AgentRole, as string, kind, text string, files []string) {
+	if taskID == "" {
+		return
+	}
+	o.broadcast(SwarmEvent{
+		Type:      EventTaskStep,
+		ProjectID: projectID,
+		Round:     round,
+		TaskID:    taskID,
+		Agent:     actor,
+		// StreamAgent names the thread this step belongs to, which may be more
+		// specific than the role.
+		StreamAgent: as,
+		Stream: &TaskStreamStep{
+			TaskID: taskID,
+			Agent:  actor,
+			As:     as,
+			Kind:   kind,
+			Text:   text,
+			Files:  files,
+			At:     time.Now(),
+		},
+	})
+}
+
+// stepThoughtAs records a named worker's plan for the task.
+func (o *Orchestrator) stepThoughtAs(projectID string, round int, taskID string, as string, reasoning, fallback string) {
+	text := reasoning
+	if text == "" {
+		text = fallback
+	}
+	o.taskStepAs(projectID, round, taskID, domain.RoleCoder, as, StepThought, text, nil)
+}
+
+// stepEditAs records which files a named worker wrote.
+func (o *Orchestrator) stepEditAs(projectID string, round int, taskID, as, summary string, files []string) {
+	o.taskStepAs(projectID, round, taskID, domain.RoleCoder, as, StepEdit, summary, files)
+}
+
+// stepTestAs records a named worker's verification result.
+func (o *Orchestrator) stepTestAs(projectID string, round int, taskID, as, summary string) {
+	o.taskStepAs(projectID, round, taskID, domain.RoleTester, as, StepTest, summary, nil)
+}

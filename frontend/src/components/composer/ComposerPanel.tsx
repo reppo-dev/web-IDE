@@ -28,10 +28,10 @@ import {
   Zap,
   BarChart3
 } from 'lucide-react';
-import { AgentMessage, ArbiterVerdict, ExecutionMode, AgentRole, ProjectPlan, AgentUsage, TaskStreamStep, FileLockInfo } from '../../types';
+import { AgentMessage, ArbiterVerdict, ExecutionMode, AgentRole, ProjectPlan, AgentUsage, TaskStreamStep, FileLockInfo, AgentConversation } from '../../types';
 import { AVAILABLE_MODELS, SWARM_PRESETS, SwarmPreset } from '../../config/models';
 import { Team } from '../../types/team';
-import { TaskStreamCard } from '../TaskStreamCard';
+import { AgentConversationPanel } from '../AgentConversationPanel';
 
 interface ComposerPanelProps {
   messages: AgentMessage[];
@@ -74,6 +74,14 @@ interface ComposerPanelProps {
   activeTaskId?: string | null;
   /** Files currently held by an agent, so concurrent editing is visible. */
   fileLocks?: FileLockInfo[];
+  /**
+   * Per-agent conversations, each gathering every task that agent worked on.
+   *
+   * This replaced one card per task, which read fine while runs were serial and
+   * fell apart under parallelism: one coder handling three tasks produced three
+   * cards, and the user had to reassemble one agent's reasoning by hand.
+   */
+  agentConversations?: AgentConversation[];
 }
 
 // Helper to render simple markdown cleanly without heavy external libs
@@ -196,6 +204,7 @@ export const ComposerPanel: React.FC<ComposerPanelProps> = ({
   taskStreamTitles,
   activeTaskId,
   fileLocks,
+  agentConversations,
 }) => {
   const [prompt, setPrompt] = useState('');
   const [showRoster, setShowRoster] = useState(false);
@@ -563,21 +572,14 @@ export const ComposerPanel: React.FC<ComposerPanelProps> = ({
         </div>
       )}
 
-      {/* Live per-task cards: one conversation per task, filling in live. */}
-      {taskStreams && Object.keys(taskStreams).length > 0 && (() => {
-        // Newest task first: the one being worked on right now is the one the
-        // user came to look at.
-        const ids = Object.keys(taskStreams).sort((a, b) => {
-          if (a === activeTaskId) return -1;
-          if (b === activeTaskId) return 1;
-          return (taskStreams[b]?.length ?? 0) - (taskStreams[a]?.length ?? 0);
-        });
-
+      {/* Live per-agent conversations: one thread per agent, gathering every task
+          that agent worked on. */}
+      {agentConversations && agentConversations.length > 0 && (() => {
         return (
-          <div className="task-streams-panel border-b border-[#222222] bg-[#141414]/90 px-3 py-2">
+          <div className="agent-conversations-panel border-b border-[#222222] bg-[#141414]/90 px-3 py-2">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[11px] font-semibold text-zinc-200">
-                جریان زنده‌ی تسک‌ها
+                گفتگوی ایجنت‌ها
               </span>
               {/* Locks make concurrent editing visible. Two agents on one file is
                   otherwise something the user only discovers by noticing that the
@@ -588,16 +590,8 @@ export const ComposerPanel: React.FC<ComposerPanelProps> = ({
                 </span>
               )}
             </div>
-            <div className="space-y-1.5 max-h-[45vh] overflow-y-auto">
-              {ids.map((id) => (
-                <TaskStreamCard
-                  key={id}
-                  taskId={id}
-                  title={taskStreamTitles?.[id] ?? ''}
-                  steps={taskStreams[id] ?? []}
-                  running={id === activeTaskId && isRunning}
-                />
-              ))}
+            <div className="max-h-[45vh] overflow-y-auto">
+              <AgentConversationPanel conversations={agentConversations} />
             </div>
           </div>
         );

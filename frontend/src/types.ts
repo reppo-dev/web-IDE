@@ -153,6 +153,8 @@ export interface SwarmEvent {
   stream?: TaskStreamStep;
   /** task_step: start a fresh card, because the task is being retried. */
   stream_reset?: boolean;
+  /** task_step: the specific thread, when several agents share a role. */
+  stream_agent?: string;
   /** locks_changed: the files currently held by some agent. */
   locks?: FileLockInfo[];
 }
@@ -167,6 +169,14 @@ export interface SwarmEvent {
 export interface TaskStreamStep {
   task_id: string;
   agent: AgentRole | 'manager' | 'tester';
+  /**
+   * The specific thread this step belongs to, e.g. "coder-2".
+   *
+   * Parallel workers all report the coder role, so the role alone would collapse
+   * three concurrent agents into one conversation — hiding the very parallelism
+   * the user is watching for.
+   */
+  as?: string;
   /** thought | tool | edit | test | review | decision | lock */
   kind: 'thought' | 'tool' | 'edit' | 'test' | 'review' | 'decision' | 'lock';
   text: string;
@@ -186,4 +196,32 @@ export interface FileLockInfo {
   agent: string;
   task_id: string;
   acquired_at: string;
+}
+
+/**
+ * One agent's conversation, gathered across every task it worked on.
+ *
+ * The earlier model gave each task its own card. That reads correctly for a
+ * serial run — one task, one agent, one card — and falls apart as soon as work
+ * overlaps: a coder working three tasks produced three separate cards with three
+ * separate headers, and the user had to piece together that it was one agent
+ * doing all of it.
+ *
+ * This mirrors how a person reads an assistant: one conversation per agent,
+ * with the task it belongs to named on each line. That is also what makes an
+ * agent's reasoning legible — the steps make sense in sequence against one
+ * another, and stop making sense when scattered across unrelated cards.
+ */
+export interface AgentConversation {
+  agent: string;
+  /** Flattened, newest last: the order the agent actually did the work in. */
+  steps: TaskStreamStep[];
+  /** Distinct tasks this agent touched, for the card header. */
+  taskIds: string[];
+  /** Task titles keyed by task id. */
+  taskTitles: Record<string, string>;
+  /** True while this agent is still working. */
+  active: boolean;
+  /** Files this agent is currently holding. */
+  lockedFiles: string[];
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { TitleBar } from './components/layout/TitleBar';
 import { ActivityBar, SidebarView } from './components/layout/ActivityBar';
 import { Sidebar } from './components/layout/Sidebar';
@@ -25,6 +25,7 @@ import {
 } from './types';
 import { SwarmPreset, SWARM_PRESETS } from './config/models';
 import { TaskStreamCard } from './components/TaskStreamCard';
+import { groupStepsByAgent } from './components/AgentConversationPanel';
 import { TeamBuilderModal } from './components/teams/TeamBuilderModal';
 import { Team } from './types/team';
 import { OpenProjectModal } from './components/projects/OpenProjectModal';
@@ -110,6 +111,24 @@ export const App: React.FC = () => {
       return { ...prev, [taskId]: [...existing, step] };
     });
   }, []);
+
+  /**
+   * The per-agent threads shown in the panel.
+   *
+   * Recomputed with useMemo rather than stored: it is a pure rearrangement of
+   * state that already exists, and keeping a second copy in sync was how the two
+   * views of "what happened" would drift apart.
+   */
+  const agentConversations = useMemo(
+    () =>
+      groupStepsByAgent(
+        Object.values(taskStreams).flat(),
+        taskStreamTitles,
+        activeTaskId,
+        fileLocks.map((l) => ({ agent: l.agent, path: l.path })),
+      ),
+    [taskStreams, taskStreamTitles, activeTaskId, fileLocks],
+  );
 
   const handleUpdateAgentModel = (role: string, model: string) => {
     setAgentModels((prev) => {
@@ -214,11 +233,17 @@ export const App: React.FC = () => {
       }
       switch (event.type) {
         case 'task_step': {
-          // A step joins its task's existing card rather than becoming a new
-          // message. This is the whole point: the user watches one task unfold
-          // instead of scrolling through hundreds of separate utterances.
+          // A step joins its agent's existing thread rather than becoming a new
+          // message. Threads are per agent, not per task: under a parallel batch
+          // one agent's reasoning is split across several tasks, and splitting it
+          // further by task would make it unreadable.
           if (!event.task_id || !event.stream) break;
-          appendTaskStep(event.task_id, event.stream, event.stream_reset);
+          const step = event.stream;
+          // A parallel worker reports the coder role but names itself, so the
+          // threads stay separate. Without this, three concurrent coders would
+          // render as one agent.
+          const threaded = { ...step, agent: (event.stream_agent || step.agent) as TaskStreamStep['agent'] };
+          appendTaskStep(event.task_id, threaded, event.stream_reset);
           setActiveTaskId(event.task_id);
           // The title travels with the event. It used to be recovered by parsing
           // the opening step's prose, which broke the moment that sentence was
@@ -856,6 +881,7 @@ export const App: React.FC = () => {
             taskStreamTitles={taskStreamTitles}
             activeTaskId={activeTaskId}
             fileLocks={fileLocks}
+            agentConversations={agentConversations}
           />
         )}
 

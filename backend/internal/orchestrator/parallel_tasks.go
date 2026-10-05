@@ -193,7 +193,7 @@ func (o *Orchestrator) runOneParallelTask(
 
 	filesBefore := len(fork.CodeFiles)
 
-	o.stepThought(projectID, sCtx.Round, task.ID, domain.RoleCoder, "",
+	o.stepThoughtAs(projectID, sCtx.Round, task.ID, agentName, "",
 		fmt.Sprintf("%s در حال پیاده‌سازی تسک %s: %s", agentName, task.ID, task.Title))
 
 	// A cancelled run must not keep calling models.
@@ -238,10 +238,11 @@ func (o *Orchestrator) runOneParallelTask(
 	outcome.Verdict = verdict
 
 	if verdict != nil && verdict.Passed {
-		o.stepTest(projectID, sCtx.Round, task.ID, "تست‌ها پاس شدند: "+verdict.Summary)
+		o.stepTestAs(projectID, sCtx.Round, task.ID, agentName,
+			"تست‌ها پاس شدند: "+verdict.Summary)
 	} else if verdict != nil {
-		o.stepReview(projectID, sCtx.Round, task.ID, domain.RoleTester,
-			"تست‌ها پاس نشدند: "+verdict.Summary)
+		o.taskStepAs(projectID, sCtx.Round, task.ID, domain.RoleTester, agentName, StepReview,
+			"تست‌ها پاس نشدند: "+verdict.Summary, nil)
 	}
 
 	// Everything the worker produced goes back in one merge, on this goroutine.
@@ -261,12 +262,12 @@ func (o *Orchestrator) runOneParallelTask(
 		// The file lock should have made this impossible. If it happened anyway,
 		// say so loudly rather than shipping one agent's version over another's.
 		log.Printf("parallel workers both wrote %v despite the lock", collisions)
-		o.stepReview(projectID, sCtx.Round, task.ID, domain.RoleSecurity,
-			fmt.Sprintf("هشدار: چند کدنویس فایل‌های یکسان را نوشتند (%s)", collisions[0]))
+		o.taskStepAs(projectID, sCtx.Round, task.ID, domain.RoleSecurity, "manager", StepReview,
+			fmt.Sprintf("هشدار: چند کدنویس فایل‌های یکسان را نوشتند (%s)", collisions[0]), nil)
 	}
 
 	if len(touched) > 0 {
-		o.stepEdit(projectID, sCtx.Round, task.ID, domain.RoleCoder,
+		o.stepEditAs(projectID, sCtx.Round, task.ID, agentName,
 			fmt.Sprintf("%d فایل تغییر کرد", len(touched)), outcome.Files)
 	}
 
