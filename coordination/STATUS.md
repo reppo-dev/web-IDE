@@ -71,6 +71,10 @@ IDE چند-ایجنتی که ایجنت‌های هوش مصنوعی با هم �
 | **تفکیک توکن‌ها و دفعات فراخوانی به‌ازای Agent و Model (§۳۷ Observability)** | کامل — Antigravity |
 | **قفل فایل با اجاره زمانی (File Lease Lock — جلوگیری از تصادم در فایل‌های مشترک)** | کامل — Claude & Antigravity |
 | **کارت زنده استریم تسک‌ها (Task = One Live Message و کامپوننت `TaskStreamCard`)** | کامل — Claude & Antigravity |
+| **موازی‌سازی واقعی تسک‌ها (True Task Parallelism با تفکیک فایل‌ها و قفل‌های اتمیک)** | کامل — Claude & Antigravity |
+| **ایزوله‌سازی کانتکست ایجنت‌ها (`Fork` و `MergeResult` با ۵ تست هم‌زمانی و race detector)** | کامل — Claude & Antigravity |
+| **رشته گفتگوی مستقل هر ایجنت (`AgentConversationPanel` و رویدادهای `taskStepAs`)** | کامل — Claude & Antigravity |
+| **اسکریپت تست خودکار end-to-end با وب‌سوکت و تلمتری (`scripts/e2e-test.ps1`)** | کامل — Claude & Antigravity |
 
 ---
 

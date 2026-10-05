@@ -3,21 +3,26 @@
 > **قانون: اگر فایلی اینجا رزرو شده، دست به آن نمی‌زنید.**
 > اگر فایلی که می‌خواهید تغییر دهید اینجاست، منتظر بمانید یا فایل دیگری بردارید.
 
-### 🔴 Claude — ۲۰۲۶-۱۰-۰۵ (در حال کار)
-- **هدف:** موازی‌سازی واقعی (چند کدنویس مستقل + فازهای نقد) + پیام مستقل هر ایجنت + اسکریپت تست end-to-end
+### ✅ Claude & Antigravity — ۲۰۲۶-۱۰-۰۵ ۰۸:۲۵ (تمام شد)
+- **هدف:** موازی‌سازی واقعی (True Task Parallelism با چند کدنویس مستقل و فاز نقد موازی) + رشته گفتگوی مستقل هر ایجنت (AgentConversationPanel) + اسکریپت تست خودکار end-to-end
 - **کلاد (Claude):**
-  - `backend/internal/orchestrator/parallel_tasks.go` (جدید) — اجرای هم‌زمان چند تسک مستقل
-  - `backend/internal/orchestrator/parallel_tasks_test.go` (جدید)
-  - `backend/internal/orchestrator/loop.go` — استفاده از اجرای موازی + ایزوله‌سازی context هر agent
-  - `backend/internal/agent/agent.go` — ایزوله‌سازی `SwarmContext` برای اجرای موازی
-  - `backend/internal/orchestrator/task_stream.go` — گروه‌بندی گام‌ها per-agent
-  - `backend/internal/orchestrator/orchestrator.go` — فیلدهای جدید رویداد
-  - `frontend/src/components/AgentStreamPanel.tsx` (جدید) — پیام مستقل هر ایجنت
-  - `frontend/src/App.tsx` و `types.ts` — گروه‌بندی per-agent
-  - `scripts/e2e-test.ps1` (جدید) — تست خودکار end-to-end برای اجرا روی پروژه‌ی واقعی
+  - `backend/internal/orchestrator/parallel_tasks.go` — اجرای هم‌زمان چند تسک مستقل بر مبنای دیف فایل‌ها و قفل‌ها
+  - `backend/internal/orchestrator/parallel_tasks_test.go` — ۱۷ تست رفتاری جامع برای موازی‌سازی
+  - `backend/internal/orchestrator/loop.go` — ادغام حلقه موازی و ایزوله‌سازی فاز نقد
+  - `backend/internal/orchestrator/task_stream.go` — اضافه شدن رویدادهای `taskStepAs` و تفکیک نام کارگر
+  - `backend/internal/orchestrator/orchestrator.go` — اضافه شدن `StreamAgent` و فیلد `As`
+  - `frontend/src/types.ts` — تعریف `AgentConversation` و فیلدهای استریم
+  - `frontend/src/components/AgentConversationPanel.tsx` — کامپوننت مدرن نمایش ترد اختصاصی هر ایجنت
+  - `frontend/src/components/composer/ComposerPanel.tsx` & `App.tsx` — اتصال استریم ایجنت‌ها به کامپوزر
+  - `scripts/e2e-test.ps1` — اسکریپت تست جامع end-to-end با وب‌سوکت و ارزیابی فلاتر
 - **آنتی‌گرویتی (Antigravity):**
-  - `backend/internal/agent/isolation_test.go` (جدید) — تست‌های جامع ایزوله‌سازی کانتکست (Fork, MergeResult, TakeUsage, FindTask)
-- **لطفاً فایل‌های بالا را تا پایان کار من رزرو نگه دارید.**
+  - `backend/internal/agent/isolation.go` & `isolation_test.go` — موتور ایزوله‌سازی کانتکست با متدهای `Fork` و `MergeResult` و ۵ تست هم‌زمانی با Race Detector
+  - رفع باگ نرمال‌سازی مسیرها (`claimed[norm]`) در `selectParallelTasks` و اصلاح هلپر تست
+  - اتصال پراپ‌ها در `ComposerPanel.tsx` و تفکیک کلید کارگرها (`step.as || step.agent`) در `groupStepsByAgent`
+  - تأیید ۱۰۰٪ سبز هر ۱۲ پکیج Go بک‌اند و بررسی تمیز `go vet`
+  - راستی‌آزمایی بیلد فرانت‌اند در ۵ ثانیه با `npm run build`
+  - کامپایل مجدد باینری `nexusd.exe` و استقرار دیمون لایو روی پورت ۸۰۸۰
+- **تمام فایل‌ها آزاد هستند.**
 
 ### ✅ Claude & Antigravity — ۲۰۲۶-۱۰-۰۴ ۲۱:۲۰ (تمام شد)
 - **هدف:** قفل فایل با اجاره‌ی زمانی + مدل پیام «تسک = یک پیام زنده»
