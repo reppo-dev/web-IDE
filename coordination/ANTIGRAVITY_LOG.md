@@ -3,6 +3,30 @@
 > این فایل متعلق به ایجنت Antigravity است.
 > اگر Claude اینجا را خواند، **دست به آن نزنید** — فقط بخوانید تا بدانید چه کرده.
 
+## ۲۰۲۶-۱۰-۰۵ ۰۹:۲۰ — پیاده‌سازی کامل بند ۱۷ (Context Budget & Context Manifest) و بند ۳۷ (ثبت Manifest کانتکست هر ایجنت) + هدایت کانتکست بر اساس تسک فعال + ۱۲ پکیج Go سبز
+
+۱. **پیاده‌سازی بند ۱۷ و ۳۷ سند ویژن (Context Budget & Context Manifest):**
+   - تعریف ساختارهای داده `ContextManifest` و `ManifestFile` در `backend/internal/workspace/context.go` برای ثبت دقیق فایل‌های لود شده، بایت‌ها، توکن‌های تخمینی، وضعیت Truncated، امتیاز ارتباط و فایل‌های حذف‌شده به علت سقف بودجه.
+   - اضافه شدن متد `SetBudget(maxFileBytes, maxTotalBytes)` به `ContextEngine` برای اعمال سقف بودجه توکن/بایت بر اساس تسک یا سشن (§۱۷ و §۲۶).
+   - اضافه شدن متد `SelectRelevantFilesWithFocus` برای اولویت‌بخشی قطعی (+1000 امتیاز) به فایل‌های تسک جاری (`focusFiles`) نسبت به کلیدواژه‌های عمومی.
+   - اضافه شدن متد `BuildCodeContextWithManifest` برای تولید کانتکست کدهای پروژه به همراه مانفیست جامع.
+
+۲. **هدایت هوشمند Context Engine بر مبنای تسک فعال و ثبت مانفیست در `SwarmContext`:**
+   - در `backend/internal/agent/coder.go`: کانتکست کدنویس حالا مستقیماً از پرامپت ترکیبی هدف و عنوان تسک فعال + فایل‌های مورد انتظار تسک (`task.Files`) ساخته می‌شود و فایل مانفیست در `sCtx.SetContextManifest(manifest)` ثبت می‌گردد.
+   - در `backend/internal/agent/custom.go`: متد `buildWork` برای اعضای تیم‌های دلخواه به همین ترتیب بهینه‌سازی شد.
+   - فیلد `LastContextManifest` و متدهای Thread-Safe مربوطه به `SwarmContext` در `agent/agent.go` متصل شدند.
+
+۳. **تست و راستی‌آزمایی:**
+   - دو تست جدید `TestContextEngineFocusFilesPrioritized` و `TestBuildCodeContextWithManifestRecordsDetails` در `context_test.go` با موفقیت ۱۰۰٪ پاس شدند.
+   - تست‌های جدید کلاد در `parallel_tasks_test.go` (`TestBatchMadeProgressDetectsAStuckBatch` و `TestPlanProgressPercentMovesOnlyWhenATaskCloses`) با موفقیت ۱۰۰٪ پاس شدند.
+   - بررسی `go vet ./...` با ۰ خطا و اخطار تأیید شد.
+   - تمام ۱۲ پکیج Go بک‌اند با `go test -count=1 ./internal/... ./api/...` مجدداً ۱۰۰٪ سبز شدند.
+   - بیلد فرانت‌اند با `npm run build` در ۳.۱۶ ثانیه با ۰ خطا کامپایل شد.
+   - باینری تازه `nexusd.exe` دوباره کامپایل و دیمون لایو روی پورت ۸۰۸۰ راه‌اندازی شد.
+   - تغییرات با کامیت تمیز `43ed3e2` در گیت ثبت شدند.
+
+---
+
 ## ۲۰۲۶-۱۰-۰۵ ۰۹:۰۸ — اجرای موفق تست واقعی scripts/e2e-test.ps1 + کشف و رفع باگ تطبیق زبان پلن (Persian vs English) + ادغام موازی‌سازی تیم‌های دلخواه کلاد + ۱۲ پکیج Go سبز
 
 ۱. **اجرای موفق اسکریپت تست خودکار کلاد (`scripts/e2e-test.ps1`):**

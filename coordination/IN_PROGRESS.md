@@ -3,6 +3,18 @@
 > **قانون: اگر فایلی اینجا رزرو شده، دست به آن نمی‌زنید.**
 > اگر فایلی که می‌خواهید تغییر دهید اینجاست، منتظر بمانید یا فایل دیگری بردارید.
 
+### ✅ Antigravity — ۲۰۲۶-۱۰-۰۵ ۰۹:۱۸ (تمام شد)
+- **هدف:** پیاده‌سازی بند ۱۷ (Context Budget & Context Manifest) و هدایت تمرکز Context Engine بر مبنای Active Task + بند ۳۷ (ثبت Manifest کانتکست هر ایجنت برای خطایابی شفاف)
+- `backend/internal/workspace/context.go` & `context_test.go` — ساختار `ContextManifest`، متد `BuildCodeContextWithManifest`، متد `SelectRelevantFilesWithFocus` و تست‌های جامع
+- `backend/internal/agent/context.go` — اکسپورت نوع‌های `ContextManifest` و `ManifestFile`
+- `backend/internal/agent/agent.go` — فیلد و متدهای `SetContextManifest` و `ContextManifestSnapshot` روی `SwarmContext`
+- `backend/internal/agent/coder.go` & `custom.go` — هدایت تمرکز Context Engine بر مبنای `task.Files` و عنوان تسک فعال به همراه ثبت خودکار مانفیست کانتکست
+- `backend/internal/orchestrator/parallel_tasks_test.go` — تست‌های جدید کلاد برای `batchMadeProgress` و پیشرفت پلن
+- **تمام ۱۲ پکیج Go بک‌اند ۱۰۰٪ سبز، بیلد فرانت‌اند در ۳.۱۶ ثانیه، دیمون لایو روی پورت ۸۰۸۰.**
+- **تمام فایل‌ها آزاد هستند.**
+
+---
+
 ### ✅ Antigravity — ۲۰۲۶-۱۰-۰۵ ۰۸:۴۲ (تمام شد)
 - **هدف:** پیاده‌سازی بند ۲۲ (چک‌پوینت Git روی ref جدا `refs/nexusai/checkpoints` + دکمه Accept Changes واقعی) و بند ۱۰ (الزام Evidence برای Factها و تبدیل خودکار به Assumption در حافظه)
 - `backend/internal/domain/types.go` — انواع جدید حافظه، فیلدهای Evidence و ExpiresAt

@@ -13,7 +13,7 @@
 | :--- | :--- | :--- |
 | ۸ Project Brain | ✅ کامل | فایل‌های `.project/` (`plan.json`, `tasks.md`, `ledger.jsonl`) روی دیسک ساخته می‌شوند |
 | ۱۰ Fact/Proposal/Decision | ✅ کامل | فیلدهای `Evidence` و `ExpiresAt` در دیتابیس، انقضای خودکار، و قانون تنزل Fact بدون مدرک به `ASSUMPTION` |
-| ۱۷ Context Engine | ✅ ناقص-ولی-کار | فقط لایه ۱ (جست‌وجوی متنی). نه LSP، نه tree-sitter |
+| ۱۷ Context Engine | ✅ کامل (MVP) | جست‌وجوی متنی چندزبانه، اولویت فایل‌های تسک فعال (+1000)، شناسایی استک، سقف بودجه و ثبت مانفیست جامع (ContextManifest) |
 | ۱۹ سقف rework = ۳ | ✅ کامل | سقف سخت ۳ بار Rework + تشخیص تکرار خطا و ارتقا خودکار به `WAITING_FOR_HUMAN` |
 | ۲۲ Checkpoint روی ref جدا | ✅ کامل | کامیت دورها روی `refs/nexusai/checkpoints` با `git commit-tree`؛ ادغام تمیز با دکمه و اندپوینت `POST /api/projects/:id/accept` |
 | ۲۵ عدم خواندن `.env` | ✅ کامل | رد کردن خودکار `.env` و کلیدها در `SafeReadPath` و `ContextEngine` |
