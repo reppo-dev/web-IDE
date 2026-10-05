@@ -145,8 +145,17 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 		// sets — so leaving them serial would have been the worst place to stop
 		// short.
 		if o.parallelEnabled() {
-			if slots := selectParallelTasks(sCtx, o.parallelBudget()); len(slots) > 1 {
-				sCtx.ClaimTasksForBatch(taskListOf(slots))
+			slots := selectParallelTasks(sCtx, o.parallelBudget())
+
+			// A batch is only worth running when tasks were actually claimed.
+			//
+			// Without this check the batch is rebuilt every round from the same
+			// tasks: a worker whose files are held comes back "skipped", the task
+			// goes back to TODO, and the next round selects it again. The loop then
+			// spins on the same tasks until the round limit runs out — no progress,
+			// no error, and nothing in the log to explain it.
+			claimed := sCtx.ClaimTasksForBatch(taskListOf(slots))
+			if len(claimed) > 1 {
 				outcomes := o.runParallelTasks(ctx, sCtx, projectID, ws, slots)
 
 				// Written once, by this goroutine, after every worker finished.
@@ -158,15 +167,33 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 					}
 				}
 				o.applyBatchOutcomes(sCtx, ws, outcomes, projectID, round)
-				o.broadcast(SwarmEvent{
-					Type:      EventRoundComplete,
-					ProjectID: projectID,
-					Round:     round,
-					Files:     sCtx.CodeFilesSnapshot(),
-					Usage:     sCtx.UsageSnapshot(),
-				})
-				round++
-				continue
+
+				// A batch where nothing ran must not consume a round. Counting it
+				// would advance the counter twice for one unit of work — once here
+				// and once in the loop's own post statement — and quietly halve the
+				// team's round budget.
+				if batchMadeProgress(outcomes) {
+					round++
+					o.broadcast(SwarmEvent{
+						Type:      EventRoundComplete,
+						ProjectID: projectID,
+						Round:     round,
+						Files:     sCtx.CodeFilesSnapshot(),
+						Usage:     sCtx.UsageSnapshot(),
+					})
+					commitHash, _ := ws.CommitRound(ctx, round, 0, "parallel batch")
+					for _, outcome := range outcomes {
+						if outcome.Task != nil {
+							o.persistChangeLedger(outcome.Task, nil, commitHash, outcome.Verdict, ws)
+						}
+					}
+					continue
+				}
+
+				// Nothing ran. Fall through to the serial path, which still
+				// enforces the round limit and the stall detector — so a team that
+				// cannot make progress ends and says so, rather than spinning.
+				log.Printf("parallel batch made no progress; falling back to one task at a time")
 			}
 		}
 

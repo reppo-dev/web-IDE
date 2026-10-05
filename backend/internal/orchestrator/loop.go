@@ -243,11 +243,22 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 		// It returns false when parallelism is off or no independent batch exists,
 		// and the loop then falls through to advancing exactly one task as before.
 		if o.parallelEnabled() {
+			before := sCtx.PlanProgressPercent()
 			if handled, err := o.runParallelBatch(ctx, sCtx, projectID, ws); err != nil {
 				return nil, err
 			} else if handled {
-				sCtx.Round++
-				continue
+				// A batch that closed nothing must not consume a round.
+				//
+				// The serial path below is not a formality: it is what stops a
+				// stuck project from looping. Falling through to it means a batch
+				// whose tasks were all blocked still ends up hitting the stall
+				// detector and reporting why, instead of spinning over the same
+				// tasks until something else gives up.
+				if sCtx.PlanProgressPercent() > before {
+					sCtx.Round++
+					continue
+				}
+				log.Printf("parallel batch closed nothing this round; advancing one task instead")
 			}
 		}
 

@@ -418,22 +418,31 @@ func (o *Orchestrator) runParallelBatch(
 		Usage:     sCtx.UsageSnapshot(),
 	})
 
-	// A batch where every task was skipped made no progress at all. Reporting
-	// that plainly lets the loop notice it is going in circles, instead of
-	// incrementing the round forever.
-	progressed := false
-	for _, outcome := range outcomes {
-		if outcome.Skipped == "" {
-			progressed = true
-			break
-		}
-	}
-	if !progressed {
+	// A batch where every task was skipped made no progress at all.
+	//
+	// It still reports handled=true, because the batch did run and did write its
+	// outcomes back to the plan. What it must not do is let the caller believe a
+	// round's worth of work happened — so the distinction is in the plan's state,
+	// not in this return value, and the caller re-checks progress itself.
+	if !batchMadeProgress(outcomes) {
 		log.Printf("parallel batch made no progress: every task was skipped")
-		return true, nil
 	}
 
 	return true, nil
+}
+
+// batchMadeProgress reports whether at least one worker actually did something.
+//
+// It is the guard against a livelock: when every task in a batch comes back
+// skipped, nothing has changed, and treating that as a completed round only
+// advances a counter over the same stuck state.
+func batchMadeProgress(outcomes []ParallelOutcome) bool {
+	for _, outcome := range outcomes {
+		if outcome.Skipped == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // taskListOf pulls the tasks out of a batch of slots.
