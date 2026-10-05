@@ -25,6 +25,7 @@
 param(
     [string]$ProjectPath = "G:\first_app",
     [string]$Prompt = "یک اپلیکیشن کپی دوالینگو برای یادگیری زبان انگلیسی برای فارسی‌زبانان بسازید",
+    [string]$TeamId = "team-developers-ninerouter",
     [int]$BackendPort = 8080,
     [string]$DaemonUrl = "",
     [int]$TimeoutMinutes = 20,
@@ -146,22 +147,44 @@ try {
     exit 1
 }
 
-# ساخت پیام شروع
-$projectId = [System.IO.Path]::GetFileName($ProjectPath.TrimEnd('\'))
+# استعلام شناسه واقعی پروژه از رجیستری بک‌اند
+$projectId = ""
+try {
+    $projs = Invoke-RestMethod -Uri "http://127.0.0.1:$BackendPort/api/projects" -TimeoutSec 5
+    foreach ($p in $projs) {
+        if ($p.root.TrimEnd('\') -eq $ProjectPath.TrimEnd('\')) {
+            $projectId = $p.id
+            break
+        }
+    }
+} catch { }
+
+if ([string]::IsNullOrEmpty($projectId)) {
+    try {
+        $regBody = @{ path = $ProjectPath } | ConvertTo-Json
+        $pRef = Invoke-RestMethod -Uri "http://127.0.0.1:$BackendPort/api/projects" -Method Post -Body $regBody -ContentType "application/json" -TimeoutSec 5
+        $projectId = $pRef.id
+    } catch {
+        $projectId = [System.IO.Path]::GetFileName($ProjectPath.TrimEnd('\'))
+    }
+}
+
 Write-Info "project_id: $projectId"
 Write-Info "prompt: $Prompt"
+Write-Info "team_id: $TeamId"
+
+$startPayload = @{
+    mode = "rolebased"
+}
+if (-not [string]::IsNullOrEmpty($TeamId)) {
+    $startPayload["team_id"] = $TeamId
+}
 
 $startMsg = @{
     action      = "start_swarm"
     project_id  = $projectId
     user_prompt = $Prompt
-    payload     = @{
-        mode = "rolebased"
-        # مدل‌ها و کلیدها از اینجا خالی می‌مانند؛ بک‌اند از تنظیمات یا محیط
-        # استفاده می‌کند. اگر مدل خاصی می‌خواهی، اینجا پر کن.
-        models  = @{}
-        apiKeys = @{}
-    }
+    payload     = $startPayload
 } | ConvertTo-Json -Depth 6 -Compress
 
 $bytes = [System.Text.Encoding]::UTF8.GetBytes($startMsg)
