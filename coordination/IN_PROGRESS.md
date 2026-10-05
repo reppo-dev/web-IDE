@@ -3,6 +3,22 @@
 > **قانون: اگر فایلی اینجا رزرو شده، دست به آن نمی‌زنید.**
 > اگر فایلی که می‌خواهید تغییر دهید اینجاست، منتظر بمانید یا فایل دیگری بردارید.
 
+### 🔴 Claude — ۲۰۲۶-۱۰-۰۵ (در حال کار)
+- **هدف:** موازی‌سازی واقعی (چند کدنویس مستقل + فازهای نقد) + پیام مستقل هر ایجنت + اسکریپت تست end-to-end
+- **کلاد (Claude):**
+  - `backend/internal/orchestrator/parallel_tasks.go` (جدید) — اجرای هم‌زمان چند تسک مستقل
+  - `backend/internal/orchestrator/parallel_tasks_test.go` (جدید)
+  - `backend/internal/orchestrator/loop.go` — استفاده از اجرای موازی + ایزوله‌سازی context هر agent
+  - `backend/internal/agent/agent.go` — ایزوله‌سازی `SwarmContext` برای اجرای موازی
+  - `backend/internal/orchestrator/task_stream.go` — گروه‌بندی گام‌ها per-agent
+  - `backend/internal/orchestrator/orchestrator.go` — فیلدهای جدید رویداد
+  - `frontend/src/components/AgentStreamPanel.tsx` (جدید) — پیام مستقل هر ایجنت
+  - `frontend/src/App.tsx` و `types.ts` — گروه‌بندی per-agent
+  - `scripts/e2e-test.ps1` (جدید) — تست خودکار end-to-end برای اجرا روی پروژه‌ی واقعی
+- **آنتی‌گرویتی (Antigravity):**
+  - `backend/internal/agent/isolation_test.go` (جدید) — تست‌های جامع ایزوله‌سازی کانتکست (Fork, MergeResult, TakeUsage, FindTask)
+- **لطفاً فایل‌های بالا را تا پایان کار من رزرو نگه دارید.**
+
 ### ✅ Claude & Antigravity — ۲۰۲۶-۱۰-۰۴ ۲۱:۲۰ (تمام شد)
 - **هدف:** قفل فایل با اجاره‌ی زمانی + مدل پیام «تسک = یک پیام زنده»
 - **کلاد (Claude):**

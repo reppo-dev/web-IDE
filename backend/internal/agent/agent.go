@@ -317,6 +317,175 @@ func (s *SwarmContext) NextTask() *domain.ProjectTask {
 	return &clone
 }
 
+// CompleteTaskAs marks a specific task finished by id.
+//
+// The by-id variants exist because a parallel batch has several tasks in flight
+// at once, so there is no single "active" task to act on. Addressing each result
+// by id is what keeps one worker's outcome from being applied to another's task.
+func (s *SwarmContext) CompleteTaskAs(id string, files []string) {
+	if s == nil || id == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.Plan == nil {
+		return
+	}
+	for i := range s.Plan.Tasks {
+		if s.Plan.Tasks[i].ID != id {
+			continue
+		}
+		s.Plan.Tasks[i].State = domain.TaskDone
+		s.Plan.Tasks[i].LastError = ""
+		if len(files) > 0 {
+			s.Plan.Tasks[i].Files = append([]string(nil), files...)
+		}
+		break
+	}
+	if s.ActiveTask != nil && s.ActiveTask.ID == id {
+		s.ActiveTask = nil
+	}
+}
+
+// SendTaskBackToReworkAs returns a specific task to the queue by id.
+//
+// This is the by-id counterpart of SendTaskBackToRework, for the same reason:
+// under a parallel batch the active task is whichever one this goroutine set, not
+// necessarily the one whose result is being handled.
+func (s *SwarmContext) SendTaskBackToReworkAs(id, reason string) {
+	if s == nil || id == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.Plan == nil {
+		return
+	}
+	for i := range s.Plan.Tasks {
+		if s.Plan.Tasks[i].ID != id {
+			continue
+		}
+		s.Plan.Tasks[i].ReworkCount++
+		s.Plan.Tasks[i].Round = s.Round
+
+		repeated := reason != "" && s.Plan.Tasks[i].LastError == reason
+		s.Plan.Tasks[i].LastError = reason
+
+		// Same escalation rule as the serial path: a task that keeps failing the
+		// same way needs a human, and retrying it forever burns the run.
+		if s.Plan.Tasks[i].ReworkCount > MaxReworkAttempts || (s.Plan.Tasks[i].ReworkCount >= 3 && repeated) {
+			s.Plan.Tasks[i].State = domain.TaskWaiting
+		} else {
+			s.Plan.Tasks[i].State = domain.TaskRework
+		}
+		break
+	}
+	if s.ActiveTask != nil && s.ActiveTask.ID == id {
+		s.ActiveTask = nil
+	}
+}
+
+// ReturnTaskToQueue puts a task back to TODO without counting a rework against
+// it.
+//
+// A task skipped because its files were held is not a failure, so charging it a
+// rework would escalate it to a human for no reason. The distinction matters: one
+// is "the team could not do this yet", the other is "the team tried and failed".
+func (s *SwarmContext) ReturnTaskToQueue(id string) {
+	if s == nil || id == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.Plan == nil {
+		return
+	}
+	for i := range s.Plan.Tasks {
+		if s.Plan.Tasks[i].ID != id {
+			continue
+		}
+		if s.Plan.Tasks[i].State == domain.TaskInProgress {
+			s.Plan.Tasks[i].State = domain.TaskTodo
+		}
+		break
+	}
+	if s.ActiveTask != nil && s.ActiveTask.ID == id {
+		s.ActiveTask = nil
+	}
+}
+
+// AvailableTasks lists the tasks that could be worked on right now, without
+// claiming any of them.
+//
+// This is the batch counterpart to NextTask. NextTask has a side effect — it
+// flips a task to IN_PROGRESS and makes it the active one — which is correct when
+// one task runs at a time and wrong when several are chosen at once. Deciding
+// which tasks form the batch and claiming them are separate steps, so the caller
+// can look at the batch before committing to it.
+func (s *SwarmContext) AvailableTasks() []*domain.ProjectTask {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.Plan == nil {
+		return nil
+	}
+
+	var available []*domain.ProjectTask
+	for i := range s.Plan.Tasks {
+		t := &s.Plan.Tasks[i]
+		switch t.State {
+		case domain.TaskTodo, domain.TaskRework, domain.TaskInProgress:
+			clone := *t
+			clone.Files = append([]string(nil), t.Files...)
+			available = append(available, &clone)
+		}
+	}
+	return available
+}
+
+// ClaimTasksForBatch marks a set of tasks IN_PROGRESS together and returns the
+// clones the workers will use.
+//
+// Claiming them in one step is what stops two workers being handed the same task,
+// which is an easy mistake once selection no longer happens one call at a time.
+func (s *SwarmContext) ClaimTasksForBatch(tasks []*domain.ProjectTask) []*domain.ProjectTask {
+	if s == nil || len(tasks) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.Plan == nil {
+		return nil
+	}
+
+	wanted := make(map[string]bool, len(tasks))
+	for _, t := range tasks {
+		if t != nil {
+			wanted[t.ID] = true
+		}
+	}
+
+	var claimed []*domain.ProjectTask
+	for i := range s.Plan.Tasks {
+		if !wanted[s.Plan.Tasks[i].ID] {
+			continue
+		}
+		s.Plan.Tasks[i].State = domain.TaskInProgress
+		s.Plan.Tasks[i].Round = s.Round
+		clone := s.Plan.Tasks[i]
+		clone.Files = append([]string(nil), s.Plan.Tasks[i].Files...)
+		claimed = append(claimed, &clone)
+	}
+	return claimed
+}
+
 // CompleteTask marks the active task finished and records which files it
 // produced, so a later round can tell real work apart from re-scoring.
 func (s *SwarmContext) CompleteTask(files []string) {
