@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 #  تست end-to-end روی پروژه‌ی واقعی
 #
 #  چرا این فایل وجود دارد:
@@ -291,16 +291,21 @@ function Handle-Event($evt) {
 
 Write-Host "  در حال دریافت رویدادها... (Ctrl+C برای توقف)" -ForegroundColor DarkGray
 
-while ((Get-Date) -lt $deadline) {
+$globalCts = New-Object System.Threading.CancellationTokenSource
+$globalCts.CancelAfter([int]([Math]::Max(1000, ($deadline - (Get-Date)).TotalMilliseconds)))
+
+while ((Get-Date) -lt $deadline -and $ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
     try {
-        $recvCts = New-Object System.Threading.CancellationTokenSource
-        $recvCts.CancelAfter(5000)
         $ms = New-Object System.IO.MemoryStream
         do {
-            $res = $ws.ReceiveAsync((New-Object System.ArraySegment[byte] -ArgumentList @(,$buffer)), $recvCts.Token).GetAwaiter().GetResult()
+            $seg = New-Object System.ArraySegment[byte] -ArgumentList @(,$buffer)
+            $res = $ws.ReceiveAsync($seg, $globalCts.Token).GetAwaiter().GetResult()
+            if ($res.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
+                Write-Info "اتصال وب‌سوکت توسط سرور بسته شد."
+                break
+            }
             if ($res.Count -gt 0) { $ms.Write($buffer, 0, $res.Count) }
         } while (-not $res.EndOfMessage)
-        $recvCts.Dispose()
 
         if ($ms.Length -gt 0) {
             $text = [System.Text.Encoding]::UTF8.GetString($ms.ToArray())
@@ -312,20 +317,21 @@ while ((Get-Date) -lt $deadline) {
             }
         }
 
-        # اگر ۹۰ ثانیه هیچ رویدادی نیامد، یعنی گیر کرده
-        if (((Get-Date) - $script:lastActivity).TotalSeconds -gt 90) {
-            Write-Warn2 "۹۰ ثانیه هیچ رویدادی نرسید — احتمالاً اجرا متوقف شده"
+        # اگر ۱۲۰ ثانیه هیچ رویدادی نیامد، یعنی احتمالاً گیر کرده
+        if (((Get-Date) - $script:lastActivity).TotalSeconds -gt 120) {
+            Write-Warn2 "۱۲۰ ثانیه هیچ رویدادی نرسید — احتمالاً اجرا متوقف شده"
             break
         }
     } catch [System.OperationCanceledException] {
-        # تایم‌اوت ۵ ثانیه‌ای دریافت، یعنی هنوز زنده است
-        continue
+        Write-Warn2 "زمان مهلت اجرا به پایان رسید"
+        break
     } catch {
         if ($_.Exception.Message -match "closed|aborted") {
             Write-Warn2 "اتصال بسته شد: $($_.Exception.Message)"
             break
         }
-        continue
+        Write-Warn2 "خطای دریافت: $($_.Exception.Message)"
+        break
     }
 
     if ($script:consensusText -ne "") { break }
@@ -504,7 +510,7 @@ if ($failures.Count -eq 0) {
     exit 0
 } else {
     Write-Host "  ══════════════════════════════════════════════" -ForegroundColor Red
-    Write-Host "   نتیجه: $failures.Count مشکل پیدا شد" -ForegroundColor Red
+    Write-Host "   نتیجه: $($failures.Count) مشکل پیدا شد" -ForegroundColor Red
     Write-Host "  ══════════════════════════════════════════════" -ForegroundColor Red
     foreach ($f in $failures) { Write-Host "     ✗ $f" -ForegroundColor Red }
     exit 1
