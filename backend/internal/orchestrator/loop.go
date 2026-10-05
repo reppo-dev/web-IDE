@@ -599,6 +599,12 @@ func (o *Orchestrator) ensurePlan(ctx context.Context, sCtx *agent.SwarmContext,
 		} else {
 			sCtx.SetPlan(plan)
 			log.Printf("resumed existing plan: %d tasks, %d done", len(plan.Tasks), countDone(plan))
+			o.broadcast(SwarmEvent{
+				Type:      EventPlanUpdated,
+				ProjectID: sCtx.ProjectID,
+				Round:     sCtx.Round,
+				Plan:      sCtx.PlanSnapshot(),
+			})
 			return nil
 		}
 	}

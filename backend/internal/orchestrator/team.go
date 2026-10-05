@@ -567,6 +567,12 @@ func (o *Orchestrator) ensureTeamPlan(ctx context.Context, sCtx *agent.SwarmCont
 		if planMatchesRequest(plan, sCtx.UserPrompt) {
 			sCtx.SetPlan(plan)
 			log.Printf("team run resumed existing plan: %d tasks, %d done", len(plan.Tasks), countDone(plan))
+			o.broadcast(SwarmEvent{
+				Type:      EventPlanUpdated,
+				ProjectID: sCtx.ProjectID,
+				Round:     sCtx.Round,
+				Plan:      sCtx.PlanSnapshot(),
+			})
 			return nil
 		}
 		log.Printf("stored plan does not match this request; building a new one")

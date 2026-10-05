@@ -77,6 +77,9 @@ IDE چند-ایجنتی که ایجنت‌های هوش مصنوعی با هم �
 | **اسکریپت تست خودکار end-to-end با وب‌سوکت و تلمتری (`scripts/e2e-test.ps1`)** | کامل — Claude & Antigravity |
 | **الزام شواهد برای Factها و انقضای خودکار حافظه (بند ۱۰ سند ویژن)** | تازه — Antigravity |
 | **چک‌پوینت Git روی ref جدا (`refs/nexusai/checkpoints`) و Accept Changes واقعی (بند ۲۲ سند ویژن)** | تازه — Antigravity |
+| **Context Manifest & Budget و تمرکز کانتکست بر Active Task (بند ۱۷ و ۳۷ سند ویژن)** | تازه — Antigravity |
+| **حل ریشه‌ای ضبط فایل‌های ابزارها و اجرای موازی چندمدلی تیم‌ها** | تازه — Claude & Antigravity |
+| **حل ریشه‌ای دروازه اعتبارسنجی تسک‌ها (TaskVerifier و رانر تست فلاتر)** | تازه — Antigravity |
 
 ---
 
