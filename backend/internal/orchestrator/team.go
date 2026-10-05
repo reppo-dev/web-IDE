@@ -62,6 +62,9 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 	for _, spec := range specs {
 		if spec.Model != "" {
 			sCtx.AgentModels[spec.Role] = spec.Model
+			if spec.Phase == domain.PhaseImplement || spec.Role == domain.RoleCoder || sCtx.AgentModels[domain.RoleCoder] == "" {
+				sCtx.AgentModels[domain.RoleCoder] = spec.Model
+			}
 		}
 	}
 	if sCtx.ToolsAccess == "" {

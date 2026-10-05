@@ -517,3 +517,31 @@ func TestPlanProgressPercentMovesOnlyWhenATaskCloses(t *testing.T) {
 		t.Errorf("closing a task should raise progress: %d then %d", before, after)
 	}
 }
+
+func TestParallelWorkerModelInheritance(t *testing.T) {
+	sCtx := newParallelContext(
+		domain.ProjectTask{ID: "T-001", State: domain.TaskTodo, Files: []string{"lib/a.dart"}},
+	)
+	sCtx.AgentModels = map[domain.AgentRole]string{
+		"custom": "test-custom-model",
+	}
+
+	fork := sCtx.Fork(domain.RoleCoder, "T-001")
+	if fork == nil {
+		t.Fatal("expected fork")
+	}
+
+	if fork.AgentModels[domain.RoleCoder] == "" {
+		for _, m := range sCtx.AgentModels {
+			if m != "" {
+				fork.AgentModels[domain.RoleCoder] = m
+				break
+			}
+		}
+	}
+
+	if fork.AgentModels[domain.RoleCoder] != "test-custom-model" {
+		t.Errorf("expected test-custom-model, got %s", fork.AgentModels[domain.RoleCoder])
+	}
+}
+

@@ -827,6 +827,20 @@ func (b *BaseAgent) getModelForRole(sCtx *SwarmContext) string {
 		if m, ok := sCtx.AgentModels[b.role]; ok && m != "" {
 			return m
 		}
+		// If coder or custom has no exact role match, look for custom, coder, or any model in AgentModels
+		if b.role == domain.RoleCoder || b.role == domain.RoleCustom {
+			if m, ok := sCtx.AgentModels[domain.RoleCoder]; ok && m != "" {
+				return m
+			}
+			if m, ok := sCtx.AgentModels["custom"]; ok && m != "" {
+				return m
+			}
+			for _, m := range sCtx.AgentModels {
+				if m != "" {
+					return m
+				}
+			}
+		}
 	}
 	return ""
 }

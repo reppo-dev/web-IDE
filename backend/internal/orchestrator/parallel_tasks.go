@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/nexusai/nexusai/backend/internal/agent"
@@ -186,6 +188,29 @@ func (o *Orchestrator) runOneParallelTask(
 	if fork == nil {
 		outcome.Skipped = "the project context could not be prepared for this task"
 		return outcome
+	}
+
+	if fork.AgentModels == nil {
+		fork.AgentModels = make(map[domain.AgentRole]string)
+	}
+	if fork.AgentModels[domain.RoleCoder] == "" {
+		var availableModels []string
+		if sCtx.AgentModels != nil {
+			for _, m := range sCtx.AgentModels {
+				if m != "" {
+					availableModels = append(availableModels, m)
+				}
+			}
+		}
+		if len(availableModels) > 0 {
+			idx := 0
+			if strings.HasPrefix(agentName, "coder-") {
+				if n, err := strconv.Atoi(strings.TrimPrefix(agentName, "coder-")); err == nil && n > 0 {
+					idx = (n - 1) % len(availableModels)
+				}
+			}
+			fork.AgentModels[domain.RoleCoder] = availableModels[idx]
+		}
 	}
 
 	// The lock is shared with every other worker, so it must be held through the
