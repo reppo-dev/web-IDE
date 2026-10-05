@@ -100,8 +100,9 @@ type ProjectTask struct {
 
 // ProjectPlan is the ordered list of work that makes the project complete.
 type ProjectPlan struct {
-	Goal  string        `json:"goal"`
-	Tasks []ProjectTask `json:"tasks"`
+	Goal   string        `json:"goal"`
+	Prompt string        `json:"prompt,omitempty"`
+	Tasks  []ProjectTask `json:"tasks"`
 }
 
 // Progress reports how much of the plan is finished and what is still open.

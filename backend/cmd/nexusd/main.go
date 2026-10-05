@@ -63,10 +63,16 @@ func main() {
 		orchestrator.Config{
 			MaxRounds: cfg.MaxRounds,
 			Mode:      cfg.Mode,
+			// Without this line the orchestrator's own field stays zero, the
+			// parallel path is skipped on every run, and the feature looks absent
+			// even though it is fully implemented.
+			MaxParallelTasks: cfg.MaxParallelTasks,
 		},
 		arch, coder, critic, sec, arb, memStore, matrix, cfg.DataDir,
 	)
 	orch.SetLLMClient(llmClient)
+	log.Printf("swarm configured: max_rounds=%d max_parallel_tasks=%d",
+		cfg.MaxRounds, cfg.MaxParallelTasks)
 
 	// 6. Initialize Custom Team Store
 	teamStore, err := team.NewSQLiteStore(cfg.DataDir)

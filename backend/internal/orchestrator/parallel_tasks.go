@@ -436,6 +436,21 @@ func (o *Orchestrator) runParallelBatch(
 	return true, nil
 }
 
+// taskListOf pulls the tasks out of a batch of slots.
+//
+// Claiming needs a flat list, while the slots also carry the reason a task was
+// skipped. Keeping the two apart means a skipped task is never handed to a
+// worker just because it was part of the batch.
+func taskListOf(slots []ParallelSlot) []*domain.ProjectTask {
+	tasks := make([]*domain.ProjectTask, 0, len(slots))
+	for _, slot := range slots {
+		if slot.Task != nil {
+			tasks = append(tasks, slot.Task)
+		}
+	}
+	return tasks
+}
+
 // parallelBudget reports how many tasks may run at once.
 //
 // A configuration that disables parallelism must still behave correctly rather

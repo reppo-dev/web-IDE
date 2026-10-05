@@ -83,7 +83,10 @@ Your role:
 	}
 	payload.IsClean = len(payload.Vulnerabilities) == 0
 
-	sCtx.SecurityReport = &payload
+	// Stored through the locked setter rather than assigned directly. The
+	// security auditor now runs on its own fork alongside the critic, and both
+	// report into the shared context — an unguarded assignment here would race.
+	sCtx.SetSecurityReport(&payload)
 
 	summary := strings.TrimSpace(payload.AttackSurface)
 	if summary == "" || summary == "Standard local app surface" {

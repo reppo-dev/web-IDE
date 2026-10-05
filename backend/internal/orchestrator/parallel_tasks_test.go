@@ -360,3 +360,43 @@ func TestParallelBudgetClampsToASaneRange(t *testing.T) {
 		}
 	}
 }
+
+// TestNewOrchestratorKeepsMaxParallelTasks exists because of a bug this whole
+// file could not catch.
+//
+// Parallel execution was fully implemented, correctly tested here, and never ran
+// once: main.go built the orchestrator's config without the field, so it stayed
+// zero, so parallelEnabled() was always false. Every test passed because they all
+// constructed the config themselves.
+//
+// The gap is not in the config struct — it is in whether the wiring reaches it.
+// So this test asserts the value survives the constructor, which is the step the
+// others all skipped.
+func TestNewOrchestratorKeepsMaxParallelTasks(t *testing.T) {
+	orch := NewOrchestrator(
+		Config{MaxRounds: 5, Mode: "rolebased", MaxParallelTasks: 3},
+		nil, nil, nil, nil, nil, nil, nil, t.TempDir(),
+	)
+
+	if got := orch.parallelBudget(); got != 3 {
+		t.Errorf("a configured parallelism of 3 should survive construction, got %d", got)
+	}
+	if !orch.parallelEnabled() {
+		t.Error("an orchestrator built with parallelism configured should have it enabled")
+	}
+}
+
+// TestSerialByDefault documents the choice that made the bug possible. A
+// zero-value config is serial, which is the safe default — but it also means any
+// missing wiring turns the feature off silently rather than loudly, which is
+// exactly what happened. This test names that risk so the default is a decision
+// on record rather than an accident.
+func TestSerialByDefault(t *testing.T) {
+	orch := &Orchestrator{}
+	if orch.parallelEnabled() {
+		t.Error("a zero-value orchestrator must stay serial; that is the safe default")
+	}
+	if got := orch.parallelBudget(); got != 1 {
+		t.Errorf("a zero-value orchestrator should have a budget of 1, got %d", got)
+	}
+}

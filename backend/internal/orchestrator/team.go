@@ -136,6 +136,40 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 				return nil, err
 			}
 		}
+		// Parallel path, identical in intent to the built-in swarm's.
+		//
+		// This is the same lesson the plan-driven loop taught twice: a fix
+		// applied to one execution path leaves the other one behind, and the
+		// second path then quietly keeps the old behaviour. Custom teams are the
+		// case that most needs parallelism — several members, unpredictable file
+		// sets — so leaving them serial would have been the worst place to stop
+		// short.
+		if o.parallelEnabled() {
+			if slots := selectParallelTasks(sCtx, o.parallelBudget()); len(slots) > 1 {
+				sCtx.ClaimTasksForBatch(taskListOf(slots))
+				outcomes := o.runParallelTasks(ctx, sCtx, projectID, ws, slots)
+
+				// Written once, by this goroutine, after every worker finished.
+				// Letting workers flush their own file lists would mean several
+				// goroutines writing the same paths at the same moment.
+				if len(sCtx.CodeFilesSnapshot()) > 0 {
+					if synced, err := ws.SyncFiles(sCtx.CodeFilesSnapshot()); err == nil {
+						sCtx.ReplaceCodeFiles(synced)
+					}
+				}
+				o.applyBatchOutcomes(sCtx, ws, outcomes, projectID, round)
+				o.broadcast(SwarmEvent{
+					Type:      EventRoundComplete,
+					ProjectID: projectID,
+					Round:     round,
+					Files:     sCtx.CodeFilesSnapshot(),
+					Usage:     sCtx.UsageSnapshot(),
+				})
+				round++
+				continue
+			}
+		}
+
 		task := sCtx.NextTask()
 
 		filesBefore := sCtx.CodeFilesSnapshot()
@@ -146,6 +180,15 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 		// about their file sets is predictable in advance.
 		var claimed []string
 		if task != nil {
+			// Open the task's live thread. Without this a custom team's run
+			// produced no task_step events at all, so its conversation panel stayed
+			// empty while the built-in swarm filled it in — the same "fixed in one
+			// path, missed in the other" defect the plan-driven loop already
+			// produced once.
+			o.beginTaskStream(projectID, round, task)
+			o.stepThought(projectID, round, task.ID, domain.RoleCoder, "",
+				fmt.Sprintf("در حال اجرای تسک %s: %s", task.ID, task.Title))
+
 			var claimOK bool
 			var claimReason string
 			claimed, claimOK, claimReason = o.claimTaskFiles(sCtx, task, "team")
@@ -219,6 +262,23 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 			}
 			if taskVerdict != nil {
 				sCtx.SetLastTaskVerdict(taskVerdict)
+
+				// The evidence, in the task's own thread. This is the line that
+				// separates "the team says it is done" from "the files exist and
+				// the tests ran" — the whole reason the gate exists.
+				if taskVerdict.Passed {
+					o.stepTest(projectID, round, task.ID,
+						"تست‌ها پاس شدند: "+taskVerdict.Summary)
+				} else {
+					o.stepReview(projectID, round, task.ID, domain.RoleTester,
+						"تست‌ها پاس نشدند و تسک به بازگشت رفت: "+taskVerdict.Summary)
+				}
+
+				if len(touched) > 0 {
+					o.stepEdit(projectID, round, task.ID, domain.RoleCoder,
+						fmt.Sprintf("%d فایل تغییر کرد", len(touched)), touched)
+				}
+
 				if taskVerdict.Passed {
 					sCtx.CompleteTask(touched)
 				} else {

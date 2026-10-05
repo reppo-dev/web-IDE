@@ -17,7 +17,16 @@ type AppConfig struct {
 	SkillsDir string               `json:"skills_dir"`
 	Mode      domain.ExecutionMode `json:"mode"`
 	MaxRounds int                  `json:"max_rounds"`
-	LLM       llm.Config           `json:"llm"`
+	// MaxParallelTasks is how many independent tasks the swarm may advance at
+	// once. Zero or one means strictly serial.
+	//
+	// It is wired through from here on purpose. The orchestrator reads this field
+	// from its own config and nothing else populates it, which is precisely how
+	// the parallel path came to exist in the code and then never actually run:
+	// the field stayed zero, so the feature was silently off at runtime while
+	// every test that exercised it directly passed.
+	MaxParallelTasks int        `json:"max_parallel_tasks"`
+	LLM              llm.Config `json:"llm"`
 
 	// Resilience knobs for the shared LLM Guard (llm.Guard):
 	// LLMMaxConcurrent caps in-flight requests toward the provider;
@@ -116,6 +125,10 @@ func LoadConfig() AppConfig {
 		SkillsDir: skillsDir,
 		Mode:      mode,
 		MaxRounds: 5,
+		// Three independent tasks at a time. Higher mostly adds cost: the agents
+		// compete for the same provider limit, so past a small number the wall
+		// time stops improving while spend keeps rising.
+		MaxParallelTasks: 3,
 		LLM: llm.Config{
 			Name:        "default",
 			BaseURL:     baseURL,

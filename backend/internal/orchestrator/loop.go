@@ -647,6 +647,29 @@ func filesTouchedThisRound(sCtx *agent.SwarmContext, before, after []domain.Code
 	return out
 }
 
+// faEnEquivalents maps common Persian tech concepts to their English equivalents
+// so that a Persian prompt can match a plan generated with English terminology.
+var faEnEquivalents = map[string][]string{
+	"دوالینگو":     {"duolingo", "duo"},
+	"انگلیسی":     {"english", "en"},
+	"فارسی":       {"persian", "farsi", "fa", "rtl"},
+	"فارسی‌زبانان": {"persian", "farsi", "speakers"},
+	"زبانان":      {"speakers"},
+	"اپلیکیشن":    {"app", "application"},
+	"برنامه":      {"app", "application", "program"},
+	"کپی":         {"clone", "copy", "replica"},
+	"کلون":        {"clone", "copy"},
+	"یادگیری":     {"learning", "learn", "study", "education"},
+	"آموزش":       {"learning", "learn", "teach", "education", "tutorial"},
+	"زبان":        {"language", "lang", "english", "persian"},
+	"فلاتر":       {"flutter", "dart"},
+	"کاربر":       {"user", "users"},
+	"تست":         {"test", "tests"},
+	"ورود":        {"login", "auth", "signin"},
+	"صوتی":        {"audio", "sound", "speech", "voice"},
+	"صدا":         {"audio", "sound", "speech", "voice"},
+}
+
 // planMatchesRequest reports whether a stored plan was made for this request.
 //
 // The stored goal is the planner's one-line summary of the original request, so
@@ -665,6 +688,30 @@ func planMatchesRequest(plan *domain.ProjectPlan, prompt string) bool {
 		return false
 	}
 
+	// 1. If plan explicitly recorded the original user prompt:
+	if plan.Prompt != "" {
+		if strings.TrimSpace(strings.ToLower(plan.Prompt)) == strings.TrimSpace(strings.ToLower(prompt)) {
+			return true
+		}
+		origWords := significantWords(plan.Prompt)
+		reqWords := significantWords(prompt)
+		if len(origWords) > 0 && len(reqWords) > 0 {
+			matched := 0
+			origSet := make(map[string]bool)
+			for _, w := range origWords {
+				origSet[w] = true
+			}
+			for _, w := range reqWords {
+				if origSet[w] {
+					matched++
+				}
+			}
+			if float64(matched)/float64(len(reqWords)) >= 0.7 {
+				return true
+			}
+		}
+	}
+
 	// Compare task titles too, not just the goal: they carry the concrete nouns.
 	existing := strings.ToLower(plan.Goal)
 	for _, t := range plan.Tasks {
@@ -681,7 +728,18 @@ func planMatchesRequest(plan *domain.ProjectPlan, prompt string) bool {
 	}
 	covered := 0
 	for _, w := range requestWords {
+		match := false
 		if strings.Contains(existing, w) {
+			match = true
+		} else if eqs, ok := faEnEquivalents[w]; ok {
+			for _, eq := range eqs {
+				if strings.Contains(existing, eq) {
+					match = true
+					break
+				}
+			}
+		}
+		if match {
 			covered++
 		}
 	}
