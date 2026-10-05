@@ -126,6 +126,17 @@ func (v *TaskVerifier) Verify(ctx context.Context, sCtx *SwarmContext) (*TaskVer
 // Both sources are consulted because the coder's output is synced to disk only
 // at the end of its phase; a file can legitimately exist in memory and not yet
 // on disk.
+func normalizePathKey(p string) string {
+	cleaned := strings.TrimSpace(p)
+	if cleaned == "" {
+		return ""
+	}
+	cleaned = filepath.Clean(cleaned)
+	cleaned = strings.TrimPrefix(cleaned, "."+string(filepath.Separator))
+	cleaned = filepath.ToSlash(cleaned)
+	return strings.ToLower(cleaned)
+}
+
 func (v *TaskVerifier) missingFiles(task *domain.ProjectTask, sCtx *SwarmContext) []string {
 	if len(task.Files) == 0 {
 		return nil
@@ -133,7 +144,10 @@ func (v *TaskVerifier) missingFiles(task *domain.ProjectTask, sCtx *SwarmContext
 
 	inMemory := make(map[string]bool, len(sCtx.CodeFilesSnapshot()))
 	for _, f := range sCtx.CodeFilesSnapshot() {
-		inMemory[f.Path] = true
+		norm := normalizePathKey(f.Path)
+		if norm != "" {
+			inMemory[norm] = true
+		}
 	}
 
 	var missing []string
@@ -142,7 +156,8 @@ func (v *TaskVerifier) missingFiles(task *domain.ProjectTask, sCtx *SwarmContext
 		if rel == "" {
 			continue
 		}
-		if inMemory[rel] {
+		norm := normalizePathKey(rel)
+		if inMemory[norm] {
 			continue
 		}
 		if sCtx.WorkspacePath == "" {
@@ -250,12 +265,35 @@ func (v *TaskVerifier) taskCode(task *domain.ProjectTask, sCtx *SwarmContext) st
 	if len(task.Files) > 0 {
 		wanted := make(map[string]bool, len(task.Files))
 		for _, f := range task.Files {
-			wanted[strings.TrimSpace(f)] = true
+			norm := normalizePathKey(f)
+			if norm != "" {
+				wanted[norm] = true
+			}
 		}
 		var scoped []domain.CodeFile
+		seen := make(map[string]bool)
 		for _, f := range files {
-			if wanted[f.Path] {
+			norm := normalizePathKey(f.Path)
+			if wanted[norm] && !seen[norm] {
 				scoped = append(scoped, f)
+				seen[norm] = true
+			}
+		}
+		// If any files named by the task exist on disk in the workspace,
+		// load them so the verifier can inspect the real files produced.
+		if sCtx.WorkspacePath != "" {
+			for _, f := range task.Files {
+				norm := normalizePathKey(f)
+				if norm != "" && !seen[norm] {
+					full := filepath.Join(sCtx.WorkspacePath, f)
+					if data, err := os.ReadFile(full); err == nil {
+						scoped = append(scoped, domain.CodeFile{
+							Path:    f,
+							Content: string(data),
+						})
+						seen[norm] = true
+					}
+				}
 			}
 		}
 		if len(scoped) > 0 {
@@ -263,6 +301,21 @@ func (v *TaskVerifier) taskCode(task *domain.ProjectTask, sCtx *SwarmContext) st
 		}
 	}
 	if len(files) == 0 {
+		if sCtx.WorkspacePath != "" && len(task.Files) > 0 {
+			var diskFiles []domain.CodeFile
+			for _, f := range task.Files {
+				full := filepath.Join(sCtx.WorkspacePath, f)
+				if data, err := os.ReadFile(full); err == nil {
+					diskFiles = append(diskFiles, domain.CodeFile{
+						Path:    f,
+						Content: string(data),
+					})
+				}
+			}
+			if len(diskFiles) > 0 {
+				return renderFiles(diskFiles)
+			}
+		}
 		return "(the project currently contains no files)"
 	}
 	return renderFiles(files)

@@ -3,6 +3,9 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/nexusai/nexusai/backend/internal/domain"
@@ -241,3 +244,67 @@ func TestTaskVerifier_NilClientFallback(t *testing.T) {
 		t.Errorf("mechanical checks passed, so nil client fallback should pass")
 	}
 }
+
+func TestTaskVerifier_PathNormalization(t *testing.T) {
+	v := NewTaskVerifier(nil)
+
+	sCtx := &SwarmContext{}
+	task := domain.ProjectTask{
+		ID:         "T-005",
+		Title:      "Check path normalization",
+		Acceptance: "Matches forward and backslashes",
+		Files:      []string{"lib/models/lesson.dart"},
+	}
+	sCtx.SetActiveTask(&task)
+	// CodeFiles has backslash (Windows style)
+	sCtx.SetCodeFiles([]domain.CodeFile{
+		{Path: "lib\\models\\lesson.dart", Content: "class Lesson {}"},
+	})
+
+	missing := v.missingFiles(&task, sCtx)
+	if len(missing) != 0 {
+		t.Errorf("expected 0 missing files due to normalization, got: %v", missing)
+	}
+
+	code := v.taskCode(&task, sCtx)
+	if !strings.Contains(code, "class Lesson {}") {
+		t.Errorf("expected taskCode to match file content despite slash differences, got: %s", code)
+	}
+}
+
+func TestTaskVerifier_TaskCodeLoadsFromDisk(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "nexus-taskcode-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	modelsDir := filepath.Join(tempDir, "lib", "models")
+	_ = os.MkdirAll(modelsDir, 0755)
+	_ = os.WriteFile(filepath.Join(modelsDir, "curriculum.dart"), []byte("class Curriculum {}"), 0644)
+
+	v := NewTaskVerifier(nil)
+	sCtx := &SwarmContext{
+		WorkspacePath: tempDir,
+	}
+	task := domain.ProjectTask{
+		ID:         "T-006",
+		Title:      "Disk file check",
+		Acceptance: "File on disk is recognized",
+		Files:      []string{"lib/models/curriculum.dart"},
+	}
+	sCtx.SetActiveTask(&task)
+	// In-memory CodeFiles is empty!
+	sCtx.SetCodeFiles(nil)
+
+	missing := v.missingFiles(&task, sCtx)
+	if len(missing) != 0 {
+		t.Errorf("expected 0 missing files when file exists on disk, got: %v", missing)
+	}
+
+	code := v.taskCode(&task, sCtx)
+	if !strings.Contains(code, "class Curriculum {}") {
+		t.Errorf("expected taskCode to read curriculum.dart from disk, got: %s", code)
+	}
+}
+

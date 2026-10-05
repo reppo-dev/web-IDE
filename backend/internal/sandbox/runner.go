@@ -104,6 +104,17 @@ func (r *Runner) RunTests(root string) (string, error) {
 			return "", nil
 		}
 		cmd = exec.CommandContext(runCtx, "go", "test", "./...")
+	case "dart":
+		if !fileExists(filepath.Join(root, "test")) {
+			return "", nil
+		}
+		if path, err := exec.LookPath("flutter"); err == nil && path != "" {
+			cmd = exec.CommandContext(runCtx, "flutter", "test", "--no-pub")
+		} else if path, err := exec.LookPath("dart"); err == nil && path != "" {
+			cmd = exec.CommandContext(runCtx, "dart", "test")
+		} else {
+			return "", nil
+		}
 	case "python":
 		if !fileExists(filepath.Join(root, "pytest.ini")) &&
 			!fileExists(filepath.Join(root, "setup.py")) &&

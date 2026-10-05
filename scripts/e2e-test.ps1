@@ -240,6 +240,10 @@ function Handle-Event($evt) {
                 text  = $evt.stream.text
                 at    = $evt.stream.at
             })
+            if ($evt.stream -and $evt.stream.text) {
+                if ($evt.stream.text -match "تست‌ها پاس شدند")  { $script:verdictPasses += "pass" }
+                if ($evt.stream.text -match "تست‌ها پاس نشدند") { $script:verdictPasses += "fail" }
+            }
             # شواهد موازی‌سازی: دو تسک که در یک ثانیه گام برداشتند
             $sec = [int][double]::Parse((Get-Date -UFormat %s))
             if (-not $script:parallelEvidence.ContainsKey($sec)) {

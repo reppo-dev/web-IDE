@@ -135,3 +135,24 @@ func TestSandboxRunner_LanguageDetection(t *testing.T) {
 		t.Errorf("expected typescript detected, got %s", detectedTS)
 	}
 }
+
+func TestSandboxRunner_RunTestsDart(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "nexus-dart-runtest-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	_ = os.WriteFile(filepath.Join(tempDir, "pubspec.yaml"), []byte("name: test_app\n"), 0644)
+	runner := NewRunner(5 * time.Second)
+
+	// No test dir -> should return empty string without error
+	out, err := runner.RunTests(tempDir)
+	if err != nil {
+		t.Errorf("expected nil error for missing test dir, got %v", err)
+	}
+	if out != "" {
+		t.Errorf("expected empty output, got %s", out)
+	}
+}
+
