@@ -65,7 +65,15 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 		}
 	}
 	if sCtx.ToolsAccess == "" {
-		sCtx.ToolsAccess = agent.AccessReadOnly
+		for _, spec := range specs {
+			if spec.ToolsAccess == string(agent.AccessWrite) || spec.ToolsAccess == string(agent.AccessFull) {
+				sCtx.ToolsAccess = agent.AccessLevel(spec.ToolsAccess)
+				break
+			}
+		}
+	}
+	if sCtx.ToolsAccess == "" {
+		sCtx.ToolsAccess = agent.AccessWrite
 	}
 	if sCtx.ToolCallBudget <= 0 {
 		sCtx.ToolCallBudget = domain.DefaultToolCallBudget
@@ -168,12 +176,13 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 				}
 				o.applyBatchOutcomes(sCtx, ws, outcomes, projectID, round)
 
-				// A batch where nothing ran must not consume a round. Counting it
-				// would advance the counter twice for one unit of work — once here
-				// and once in the loop's own post statement — and quietly halve the
-				// team's round budget.
+				// A batch where nothing ran must not consume a round.
+				//
+				// The counter is advanced only by the loop's own post statement.
+				// Incrementing it here as well would count one batch as two
+				// rounds and quietly halve the team's round budget — the run would
+				// stop halfway through the plan with rounds still nominally left.
 				if batchMadeProgress(outcomes) {
-					round++
 					o.broadcast(SwarmEvent{
 						Type:      EventRoundComplete,
 						ProjectID: projectID,
@@ -182,9 +191,12 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 						Usage:     sCtx.UsageSnapshot(),
 					})
 					commitHash, _ := ws.CommitRound(ctx, round, 0, "parallel batch")
+					// Each task records the files it actually wrote. Passing nil here
+					// would silently drop every entry, leaving the change ledger
+					// empty for a batch that did real work.
 					for _, outcome := range outcomes {
-						if outcome.Task != nil {
-							o.persistChangeLedger(outcome.Task, nil, commitHash, outcome.Verdict, ws)
+						if outcome.Task != nil && len(outcome.Files) > 0 {
+							o.persistChangeLedger(outcome.Task, outcome.Files, commitHash, outcome.Verdict, ws)
 						}
 					}
 					continue
@@ -357,7 +369,7 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 				ProjectID: projectID,
 				Round:     round,
 				Verdict:   verdict,
-				Files:     sCtx.CodeFiles,
+				Files:     sCtx.CodeFilesSnapshot(),
 				Plan:      sCtx.PlanSnapshot(),
 				Usage:     sCtx.UsageSnapshot(),
 				Payload:   report,
@@ -372,7 +384,7 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 				ProjectID: projectID,
 				Round:     round,
 				Verdict:   verdict,
-				Files:     sCtx.CodeFiles,
+				Files:     sCtx.CodeFilesSnapshot(),
 				Plan:      sCtx.PlanSnapshot(),
 				Usage:     sCtx.UsageSnapshot(),
 			})
@@ -694,7 +706,7 @@ func (o *Orchestrator) runTeamPhases(ctx context.Context, sCtx *agent.SwarmConte
 					Round:     sCtx.Round,
 					Agent:     spec.Role,
 					Message:   msg,
-					Files:     sCtx.CodeFiles,
+					Files:     sCtx.CodeFilesSnapshot(),
 					Usage:     sCtx.UsageSnapshot(),
 				})
 			}()

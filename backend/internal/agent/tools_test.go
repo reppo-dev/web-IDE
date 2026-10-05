@@ -600,3 +600,28 @@ func TestTimedOutAgentStillReports(t *testing.T) {
 		t.Errorf("expected status timed_out, got %v", payload["status"])
 	}
 }
+
+func TestToolExecutorWrittenFilesTracked(t *testing.T) {
+	root := seedProject(t)
+	e := NewToolExecutor(root, AccessWrite, nil, NewToolBudget(5, 0))
+
+	code := "package main\n\nfunc NewFeature() string { return \"ok\" }\n"
+	res := e.Run(context.Background(), &ToolCall{
+		Name: ToolWriteFile,
+		Args: map[string]interface{}{
+			"path":    "feature.go",
+			"content": code,
+		},
+	})
+	if !res.OK {
+		t.Fatalf("write_file failed: %s", res.Content)
+	}
+
+	written := e.WrittenFiles()
+	if len(written) != 1 {
+		t.Fatalf("expected 1 written file, got %d", len(written))
+	}
+	if written[0].Path != "feature.go" || written[0].Content != code {
+		t.Errorf("unexpected written file: %+v", written[0])
+	}
+}

@@ -110,13 +110,13 @@ func (o *Orchestrator) runConcurrentLegacy(ctx context.Context, projectID string
 			Round:     round,
 			Agent:     domain.RoleCoder,
 			Message:   coderMsg,
-			Files:     sCtx.CodeFiles,
+			Files:     sCtx.CodeFilesSnapshot(),
 		})
 		o.broadcast(SwarmEvent{
 			Type:      EventCodeUpdated,
 			ProjectID: projectID,
 			Round:     round,
-			Files:     sCtx.CodeFiles,
+			Files:     sCtx.CodeFilesSnapshot(),
 		})
 
 		// Step 3: Fan-out to Critic and Security Auditor concurrently via channels
@@ -211,7 +211,7 @@ func (o *Orchestrator) runConcurrentLegacy(ctx context.Context, projectID string
 				ProjectID: projectID,
 				Round:     round,
 				Verdict:   sCtx.ArbiterVerdict,
-				Files:     sCtx.CodeFiles,
+				Files:     sCtx.CodeFilesSnapshot(),
 			})
 			return sCtx, nil
 		}

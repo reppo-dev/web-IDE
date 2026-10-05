@@ -401,6 +401,61 @@ func TestSerialByDefault(t *testing.T) {
 	}
 }
 
+// TestFilesChangedSinceCoversRevisions covers the bug that made most tasks
+// report nothing.
+//
+// Detecting new work by comparing list lengths misses the single most common case:
+// revising a file that already exists leaves the list the same size. The task then
+// records no files, the plan is given an empty file list, and the change ledger
+// shows nothing despite the code having changed.
+func TestFilesChangedSinceCoversRevisions(t *testing.T) {
+	before := map[string]string{
+		"lib/theme.dart": "original theme",
+		"lib/other.dart": "untouched",
+	}
+
+	// A coder rewrote one file, added another, and left a third alone.
+	after := []domain.CodeFile{
+		{Path: "lib/theme.dart", Content: "REWRITTEN theme"},
+		{Path: "lib/other.dart", Content: "untouched"},
+		{Path: "lib/new.dart", Content: "brand new"},
+	}
+
+	changed := filesChangedSince(before, after)
+	got := map[string]bool{}
+	for _, f := range changed {
+		got[f.Path] = true
+	}
+
+	if !got["lib/theme.dart"] {
+		t.Error("a rewritten file must count as changed; comparing list lengths misses it")
+	}
+	if !got["lib/new.dart"] {
+		t.Error("a new file must count as changed")
+	}
+	if got["lib/other.dart"] {
+		t.Error("an untouched file must not count as changed")
+	}
+	if len(changed) != 2 {
+		t.Errorf("expected exactly two changed files, got %d: %+v", len(changed), changed)
+	}
+}
+
+// TestFilesChangedSinceIsEmptyWhenNothingHappened matters because the reverse
+// mistake is worse: reporting every file as changed would make every parallel task
+// claim the whole project, and the file lock would then block all of them.
+func TestFilesChangedSinceIsEmptyWhenNothingHappened(t *testing.T) {
+	before := map[string]string{"lib/a.dart": "same", "lib/b.dart": "also same"}
+	after := []domain.CodeFile{
+		{Path: "lib/a.dart", Content: "same"},
+		{Path: "lib/b.dart", Content: "also same"},
+	}
+
+	if changed := filesChangedSince(before, after); len(changed) != 0 {
+		t.Errorf("an unchanged project should report no changed files, got %+v", changed)
+	}
+}
+
 // TestBatchMadeProgressDetectsAStuckBatch covers the livelock guard.
 //
 // Every task in this batch was blocked, so nothing changed. A loop that treated

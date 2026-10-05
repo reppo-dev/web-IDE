@@ -282,7 +282,7 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 					ProjectID: projectID,
 					Round:     sCtx.Round,
 					Verdict:   sCtx.ArbiterVerdict,
-					Files:     sCtx.CodeFiles,
+					Files:     sCtx.CodeFilesSnapshot(),
 					// Plan travels with the event so a client reading the plan
 					// rather than the prose can still tell a finished project
 					// from one that stopped with work outstanding.

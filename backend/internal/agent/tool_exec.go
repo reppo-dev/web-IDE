@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/nexusai/nexusai/backend/internal/domain"
 	"github.com/nexusai/nexusai/backend/internal/llm"
 	"github.com/nexusai/nexusai/backend/internal/workspace"
 )
@@ -78,6 +79,8 @@ type Result struct {
 	Err error
 	PromptTokens int
 	OutputTokens int
+	// WrittenFiles is the set of files created or changed by tool calls.
+	WrittenFiles []domain.CodeFile
 }
 
 // ToolHistory renders past tool results for the next model turn.
@@ -102,8 +105,12 @@ func ToolHistory(results []ToolResult) string {
 }
 
 // Run performs one task, letting the model call tools until it answers.
-func (l *ToolLoop) Run(ctx context.Context, baseReq llm.Request) Result {
-	out := Result{}
+func (l *ToolLoop) Run(ctx context.Context, baseReq llm.Request) (out Result) {
+	if l.executor != nil {
+		defer func() {
+			out.WrittenFiles = l.executor.WrittenFiles()
+		}()
+	}
 
 	turns := l.maxTurns
 	if turns <= 0 || turns > maxToolTurns {

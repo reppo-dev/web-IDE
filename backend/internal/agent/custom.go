@@ -206,10 +206,15 @@ func (c *CustomAgent) toolLoopFor(sCtx *SwarmContext) *ToolLoop {
 		return nil
 	}
 	access := sCtx.ToolsAccess
+	if c.spec.ToolsAccess != "" {
+		access = AccessLevel(c.spec.ToolsAccess)
+	}
 	if access == "" {
-		// A team that did not ask for tools stays read-only rather than gaining
-		// write access by default.
-		access = AccessReadOnly
+		if c.spec.Phase == domain.PhaseImplement || c.spec.Role == domain.RoleCoder {
+			access = AccessWrite
+		} else {
+			access = AccessReadOnly
+		}
 	}
 	if sCtx.ToolsDisabled {
 		return nil
@@ -242,6 +247,9 @@ func (c *CustomAgent) executeWithTools(ctx context.Context, sCtx *SwarmContext, 
 	if res.TimedOut {
 		// A stalled provider must not look like a crash. Report what this agent
 		// managed to do and let the rest of the team finish the round.
+		if len(res.WrittenFiles) > 0 {
+			sCtx.MergeCodeFiles(res.WrittenFiles)
+		}
 		if len(res.ToolCalls) > 0 {
 			c.lastToolTrace = ToolResultsToJSON(res.ToolCalls)
 			c.commitResult(ctx, sCtx, res.Content)
@@ -256,6 +264,9 @@ func (c *CustomAgent) executeWithTools(ctx context.Context, sCtx *SwarmContext, 
 		return c.createMessageWithReasoning(sCtx, domain.MsgAgentReport, payload, res.Content, res.Reasoning)
 	}
 
+	if len(res.WrittenFiles) > 0 {
+		sCtx.MergeCodeFiles(res.WrittenFiles)
+	}
 	if len(res.ToolCalls) > 0 {
 		c.commitResult(ctx, sCtx, res.Content)
 		c.lastToolTrace = ToolResultsToJSON(res.ToolCalls)
@@ -380,6 +391,11 @@ func (c *CustomAgent) commitResult(ctx context.Context, sCtx *SwarmContext, cont
 		}
 		if json.Unmarshal([]byte(cleaned), &cr) == nil && len(cr.Files) > 0 {
 			sCtx.MergeCodeFiles(cr.Files)
+		} else {
+			var direct []domain.CodeFile
+			if json.Unmarshal([]byte(cleaned), &direct) == nil && len(direct) > 0 {
+				sCtx.MergeCodeFiles(direct)
+			}
 		}
 
 	case domain.RoleCritic:
@@ -411,6 +427,11 @@ func (c *CustomAgent) commitResult(ctx context.Context, sCtx *SwarmContext, cont
 		}
 		if json.Unmarshal([]byte(cleaned), &cr) == nil && len(cr.Files) > 0 {
 			sCtx.MergeCodeFiles(cr.Files)
+		} else {
+			var direct []domain.CodeFile
+			if json.Unmarshal([]byte(cleaned), &direct) == nil && len(direct) > 0 {
+				sCtx.MergeCodeFiles(direct)
+			}
 		}
 	}
 

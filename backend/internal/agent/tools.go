@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nexusai/nexusai/backend/internal/domain"
 	"github.com/nexusai/nexusai/backend/internal/workspace"
 )
 
@@ -205,6 +206,7 @@ type ToolExecutor struct {
 	budget   *ToolBudget
 	// writes counts successful writes so the orchestrator can report them.
 	writes int
+	writtenFiles []domain.CodeFile
 }
 
 // NewToolExecutor builds an executor scoped to a project root.
@@ -219,6 +221,16 @@ func (e *ToolExecutor) SetDetector(fn func(root string) (string, error)) {
 
 // Writes reports how many files the agent has changed.
 func (e *ToolExecutor) Writes() int { return e.writes }
+
+// WrittenFiles returns every file that was created or changed during tool execution.
+func (e *ToolExecutor) WrittenFiles() []domain.CodeFile {
+	if len(e.writtenFiles) == 0 {
+		return nil
+	}
+	out := make([]domain.CodeFile, len(e.writtenFiles))
+	copy(out, e.writtenFiles)
+	return out
+}
 
 // HasTool reports whether a tool is allowed at the current access level.
 func (e *ToolExecutor) HasTool(name string) bool {
@@ -418,6 +430,10 @@ func (e *ToolExecutor) writeFile(args map[string]interface{}) string {
 		if err := e.ws.SaveFile(path, content); err != nil {
 			return "error: " + err.Error()
 		}
+		e.writtenFiles = append(e.writtenFiles, domain.CodeFile{
+			Path:    filepath.ToSlash(path),
+			Content: content,
+		})
 		return ""
 	}
 
@@ -431,6 +447,10 @@ func (e *ToolExecutor) writeFile(args map[string]interface{}) string {
 	if err := os.WriteFile(abs, []byte(content), 0644); err != nil {
 		return "error: " + err.Error()
 	}
+	e.writtenFiles = append(e.writtenFiles, domain.CodeFile{
+		Path:    filepath.ToSlash(path),
+		Content: content,
+	})
 	return ""
 }
 

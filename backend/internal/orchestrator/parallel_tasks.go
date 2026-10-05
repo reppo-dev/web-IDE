@@ -194,7 +194,10 @@ func (o *Orchestrator) runOneParallelTask(
 
 	o.broadcastLocks(sCtx, projectID, sCtx.Round)
 
-	filesBefore := len(fork.CodeFiles)
+	filesBefore := map[string]string{}
+	for _, f := range fork.CodeFiles {
+		filesBefore[f.Path] = f.Content
+	}
 
 	o.stepThoughtAs(projectID, sCtx.Round, task.ID, agentName, "",
 		fmt.Sprintf("%s در حال پیاده‌سازی تسک %s: %s", agentName, task.ID, task.Title))
@@ -217,9 +220,16 @@ func (o *Orchestrator) runOneParallelTask(
 		return outcome
 	}
 
-	touched := fork.CodeFiles
+	// Only the files this worker actually added or rewrote.
+	//
+	// Comparing against the fork's starting contents, not against a slice
+	// length. A coder that revises an existing file does not grow the list, so
+	// slicing by count reported nothing for the most common case of all — and
+	// merging the whole list instead would let one worker write back its stale
+	// snapshot over another worker's finished work.
+	touched := filesChangedSince(filesBefore, fork.CodeFiles)
 	if len(touched) > 0 {
-		outcome.Files = relativePaths(touched[filesBefore:])
+		outcome.Files = relativePaths(touched)
 	}
 
 	// Verify this task against the real code, in this worker, before anything is
@@ -276,6 +286,23 @@ func (o *Orchestrator) runOneParallelTask(
 
 	o.broadcastLocks(sCtx, projectID, sCtx.Round)
 	return outcome
+}
+
+// filesChangedSince reports which files a worker actually wrote.
+//
+// The original files are keyed by path so the comparison is on content, not on
+// list length. That distinction is the whole point: a revision to an existing
+// file leaves the list the same size while being the single most common thing a
+// task does, and a length-based check misses every one of them.
+func filesChangedSince(before map[string]string, after []domain.CodeFile) []domain.CodeFile {
+	var changed []domain.CodeFile
+	for _, f := range after {
+		previous, existed := before[f.Path]
+		if !existed || previous != f.Content {
+			changed = append(changed, f)
+		}
+	}
+	return changed
 }
 
 // relativePaths reduces absolute file records to project-relative paths.

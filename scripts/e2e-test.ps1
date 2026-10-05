@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 #  تست end-to-end روی پروژه‌ی واقعی
 #
 #  چرا این فایل وجود دارد:
@@ -313,7 +313,7 @@ while ((Get-Date) -lt $deadline -and $ws.State -eq [System.Net.WebSockets.WebSoc
                 $evt = $text | ConvertFrom-Json
                 Handle-Event $evt
             } catch {
-                Write-Warn2 "پیام قابل تفسیر نبود: $($text.Substring(0, [Math]::Min(120, $text.Length)))"
+                Write-Warn2 "پیام قابل تفسیر نبود ($($_.Exception.Message)): $($text.Substring(0, [Math]::Min(120, $text.Length)))"
             }
         }
 
