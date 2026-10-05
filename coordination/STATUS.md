@@ -2,7 +2,7 @@
 
 > این فایل را هر سه ایجنت به‌روز می‌کنند. کوتاه نگهش دارید.
 
-**آخرین به‌روزرسانی:** ۲۰۲۶-۱۰-۰۳ — معماری Plan-Driven Loop، TaskVerifier، و Task Board کامل و ۱۰۰٪ سبز شد.
+**آخرین به‌روزرسانی:** ۲۰۲۶-۱۰-۰۵ — چک‌پوینت Git روی ref جدا (`refs/nexusai/checkpoints`)، پذیرش واقعی تغییرات (`POST /api/projects/:id/accept`)، و قانون Grounding/Evidence برای حافظه پروژه (بند ۱۰ و ۲۲) کامل شد. ۱۲ پکیج Go بک‌اند ۱۰۰٪ سبز.
 
 ---
 
@@ -75,6 +75,8 @@ IDE چند-ایجنتی که ایجنت‌های هوش مصنوعی با هم �
 | **ایزوله‌سازی کانتکست ایجنت‌ها (`Fork` و `MergeResult` با ۵ تست هم‌زمانی و race detector)** | کامل — Claude & Antigravity |
 | **رشته گفتگوی مستقل هر ایجنت (`AgentConversationPanel` و رویدادهای `taskStepAs`)** | کامل — Claude & Antigravity |
 | **اسکریپت تست خودکار end-to-end با وب‌سوکت و تلمتری (`scripts/e2e-test.ps1`)** | کامل — Claude & Antigravity |
+| **الزام شواهد برای Factها و انقضای خودکار حافظه (بند ۱۰ سند ویژن)** | تازه — Antigravity |
+| **چک‌پوینت Git روی ref جدا (`refs/nexusai/checkpoints`) و Accept Changes واقعی (بند ۲۲ سند ویژن)** | تازه — Antigravity |
 
 ---
 
