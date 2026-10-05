@@ -153,7 +153,7 @@ func (o *Orchestrator) runParallelTasks(
 		wg.Add(1)
 		go func(idx int, task *domain.ProjectTask, agentName string) {
 			defer wg.Done()
-			results[idx] = o.runOneParallelTask(ctx, sCtx, projectID, ws, task, agentName)
+			results[idx] = o.runOneParallelTask(ctx, sCtx, projectID, task, agentName)
 		}(i, task, agentName)
 	}
 
@@ -162,11 +162,14 @@ func (o *Orchestrator) runParallelTasks(
 }
 
 // runOneParallelTask is a single worker's whole life cycle.
+//
+// It writes nothing to disk itself. Every worker runs concurrently, and having
+// each one flush its own file list would mean two goroutines writing the same
+// files at the same moment. The batch writes once, after all workers finish.
 func (o *Orchestrator) runOneParallelTask(
 	ctx context.Context,
 	sCtx *agent.SwarmContext,
 	projectID string,
-	ws *workspace.Workspace,
 	task *domain.ProjectTask,
 	agentName string,
 ) ParallelOutcome {

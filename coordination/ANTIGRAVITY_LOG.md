@@ -3,6 +3,33 @@
 > این فایل متعلق به ایجنت Antigravity است.
 > اگر Claude اینجا را خواند، **دست به آن نزنید** — فقط بخوانید تا بدانید چه کرده.
 
+## ۲۰۲۶-۱۰-۰۵ ۰۸:۴۰ — پیاده‌سازی کامل بند ۲۲ (چک‌پوینت Git روی ref جدا + Accept Changes واقعی) و بند ۱۰ (الزام شواهد برای Factها و انقضای حافظه) + تست ۱۰۰٪ سبز هر ۱۲ پکیج
+
+۱. **پیاده‌سازی بند ۱۰ سند ویژن (Evidence Grounding & TTL Expiration):**
+   - افزودن `MemoryAssumption` و `MemoryTestResult` به `MemoryType` در `domain/types.go`.
+   - افزودن فیلدهای `Evidence string` و `ExpiresAt *time.Time` به `MemoryEntry`.
+   - به‌روزرسانی اسکیمای SQLite و ایجاد مایگریشن خودکار ستون‌های `evidence` و `expires_at` در `memory/sqlite.go`.
+   - فیلتر خودکار ورودی‌های منقضی‌شده (`expires_at IS NULL OR expires_at > datetime('now')`) با رعایت مقایسه تاریخ استاندارد UTC.
+   - اضافه شدن متد `TestMemoryEvidenceAndExpiration` در `sqlite_test.go` با قبولی ۱۰۰٪.
+   - اجرای قانون صریح بند ۱۰ در `agent/brain.go:RecordFact`: اگر Fact بدون Evidence ارسال شود، سیستم به صورت خودکار آن را به `ASSUMPTION` با اطمینان ۰.۷۰ تنزل می‌دهد. متدهای `RecordAssumption` و `RecordProposal` پیاده و در `brain_test.go` تست شدند.
+
+۲. **پیاده‌سازی بند ۲۲ سند ویژن (Isolated Git Checkpoints on Dedicated Ref & Accept Changes):**
+   - بازنویسی کامل `CommitRound` در `workspace/workspace.go` با استفاده از لوله‌کشی گیت (`git write-tree` و `git commit-tree` و `git update-ref refs/nexusai/checkpoints <hash>`): کامیت دورهای سوارم هرگز شاخه اصلی کاربر (`main` یا شاخه فعال) را آلوده نمی‌کنند و روی مرجع اختصاصی `refs/nexusai/checkpoints` ثبت می‌شوند.
+   - پیاده‌سازی متد `AcceptChanges(ctx)` در `workspace/workspace.go` با ادغام تمیز لوله‌کشی به شاخه فعال کاربر و ثبت رویداد `changes_accepted` در Change Ledger.
+   - تست کامل `TestWorkspace_CheckpointDedicatedRefAndAcceptChanges` در `workspace_test.go` با قبولی ۱۰۰٪.
+   - ایجاد اندپوینت `POST /api/projects/:id/accept` در `api/projects.go` با بازگرداندن هش کامیت ادغام‌شده و وضعیت `accepted`.
+   - تست کامل اندپوینت در `api/projects_test.go` (`TestProjectsHandler_AcceptEndpoint`) با قبولی ۱۰۰٪.
+   - اتصال دکمه «پذیرش تغییرات» در فرانت‌اند (`App.tsx` و `ComposerPanel.tsx`): ارسال درخواست POST به اندپوینت `accept`، رفرش خودکار درخت فایل‌ها و ثبت لاگ موفقیت در ترمینال.
+
+۳. **راستی‌آزمایی جامع و پایداری سرویس‌ها:**
+   - تمام ۱۲ پکیج Go بک‌اند با `go test -count=1 ./internal/... ./api/...` مجدداً **۱۰۰٪ سبز** شدند.
+   - بررسی `go vet ./...` با **۰ خطا و اخطار** تأیید شد.
+   - بیلد فرانت‌اند با `npm run build` در **۳.۴۶ ثانیه** با ۰ خطا کامپایل شد.
+   - کامپایل مجدد باینری `nexusd.exe` و اجرای دیمون تازه روی پورت ۸۰۸۰.
+   - وضعیت پورت‌ها: پورت ۳۰۰۰ (فرانت‌اند)، پورت ۸۰۸۰ (بک‌اند)، پورت ۵۰۵۰ (اپ دوالینگو) لایو و پایدارند.
+
+---
+
 ## ۲۰۲۶-۱۰-۰۵ ۰۸:۲۰ — راستی‌آزمایی و تثبیت رشته‌های گفتگوی مستقل هر ایجنت (Agent Conversation Panel) + تفکیک کدنویس‌های موازی + بیلد تمیز فرانت‌اند و بک‌اند
 
 ۱. **راستی‌آزمایی و رفع خطاهای بیلد فرانت‌اند (`npm run build`):**

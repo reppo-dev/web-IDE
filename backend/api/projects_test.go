@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -355,4 +356,77 @@ func TestProjectsHandler_LedgerEndpoint(t *testing.T) {
 		t.Errorf("unexpected ledger entry: %+v", loadedLedger[0])
 	}
 }
+
+func TestProjectsHandler_AcceptEndpoint(t *testing.T) {
+	projDir, reg := setupTestProject(t)
+	handler := NewProjectHandler(reg)
+
+	ref, err := reg.Register(projDir)
+	if err != nil {
+		t.Fatalf("failed to register project: %v", err)
+	}
+
+	ws, err := workspace.NewWorkspace("", ref.Root)
+	if err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	// Commit round creates checkpoint on refs/nexusai/checkpoints
+	checkpointHash, err := ws.CommitRound(reqContext(), 1, 90.0, "API test checkpoint")
+	if err != nil {
+		t.Fatalf("commit round failed: %v", err)
+	}
+	if checkpointHash == "" {
+		t.Fatal("expected non-empty checkpoint hash")
+	}
+
+	// Call POST /api/projects/:id/accept
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+ref.ID+"/accept", nil)
+	rec := httptest.NewRecorder()
+	handler.HandleProjects(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for accept endpoint, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Status    string `json:"status"`
+		Commit    string `json:"commit"`
+		ProjectID string `json:"project_id"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode accept response: %v", err)
+	}
+
+	if resp.Status != "accepted" {
+		t.Errorf("expected status 'accepted', got %q", resp.Status)
+	}
+	if resp.Commit == "" {
+		t.Error("expected non-empty commit hash")
+	}
+	if resp.ProjectID != ref.ID {
+		t.Errorf("expected project ID %q, got %q", ref.ID, resp.ProjectID)
+	}
+
+	// Verify ledger recorded changes_accepted
+	ledger, err := ws.Brain().ReadLedger()
+	if err != nil {
+		t.Fatalf("failed to read ledger: %v", err)
+	}
+	foundAccepted := false
+	for _, l := range ledger {
+		if l.Event == "changes_accepted" {
+			foundAccepted = true
+			break
+		}
+	}
+	if !foundAccepted {
+		t.Errorf("ledger does not contain changes_accepted event")
+	}
+}
+
+func reqContext() context.Context {
+	return context.Background()
+}
+
 

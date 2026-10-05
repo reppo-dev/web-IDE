@@ -96,3 +96,78 @@ func TestWorkspace_SyncAndCommit(t *testing.T) {
 	}
 }
 
+func TestWorkspace_CheckpointDedicatedRefAndAcceptChanges(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "nexus-ws-chk-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	ws, err := NewWorkspace(tempDir, "checkpoint-proj")
+	if err != nil {
+		t.Fatalf("failed to init workspace: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// 1. Initial file
+	files := []domain.CodeFile{
+		{
+			Path:     "app.go",
+			Language: "go",
+			Content:  "package app\n\nconst Version = \"1.0.0\"\n",
+		},
+	}
+	if _, err := ws.SyncFiles(files); err != nil {
+		t.Fatalf("sync files failed: %v", err)
+	}
+
+	// 2. Commit round creates checkpoint on refs/nexusai/checkpoints
+	hash1, err := ws.CommitRound(ctx, 1, 88.0, "Round 1 checkpoint")
+	if err != nil {
+		t.Fatalf("commit round 1 failed: %v", err)
+	}
+	if hash1 == "" {
+		t.Fatal("expected non-empty checkpoint hash")
+	}
+
+	// 3. Update file and commit round 2
+	files[0].Content = "package app\n\nconst Version = \"2.0.0\"\n"
+	if _, err := ws.SyncFiles(files); err != nil {
+		t.Fatalf("sync round 2 files failed: %v", err)
+	}
+	hash2, err := ws.CommitRound(ctx, 2, 95.0, "Round 2 checkpoint")
+	if err != nil {
+		t.Fatalf("commit round 2 failed: %v", err)
+	}
+	if hash2 == "" || hash2 == hash1 {
+		t.Fatalf("expected distinct checkpoint hash, got %q", hash2)
+	}
+
+	// 4. Accept Changes merges checkpoint to HEAD
+	finalHash, err := ws.AcceptChanges(ctx)
+	if err != nil {
+		t.Fatalf("accept changes failed: %v", err)
+	}
+	if finalHash == "" {
+		t.Fatal("expected non-empty final hash after accepting changes")
+	}
+
+	// Verify ledger recorded changes_accepted
+	ledger, err := ws.Brain().ReadLedger()
+	if err != nil {
+		t.Fatalf("failed to read ledger: %v", err)
+	}
+	foundAccepted := false
+	for _, l := range ledger {
+		if l.Event == "changes_accepted" {
+			foundAccepted = true
+			break
+		}
+	}
+	if !foundAccepted {
+		t.Errorf("ledger did not record changes_accepted event")
+	}
+}
+
+

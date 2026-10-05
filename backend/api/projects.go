@@ -38,6 +38,7 @@ func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
 //	GET    /api/projects/{id}/file?path=  read one file
 //	GET    /api/projects/{id}/plan        read project plan (.project/plan.json)
 //	GET    /api/projects/{id}/ledger      read project change ledger (.project/ledger.jsonl)
+//	POST   /api/projects/{id}/accept      accept and merge swarm checkpoints into active branch
 func (h *ProjectHandler) HandleProjects(w http.ResponseWriter, r *http.Request) {
 	if h.registry == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "project registry unavailable"})
@@ -77,6 +78,10 @@ func (h *ProjectHandler) HandleProjects(w http.ResponseWriter, r *http.Request) 
 		h.tree(w, r, id)
 
 	case http.MethodPost:
+		if id != "" && sub == "accept" {
+			h.acceptChanges(w, r, id)
+			return
+		}
 		h.openProject(w, r)
 
 	default:
@@ -240,6 +245,34 @@ func (h *ProjectHandler) readLedger(w http.ResponseWriter, r *http.Request, id s
 	}
 
 	writeJSON(w, http.StatusOK, entries)
+}
+
+// acceptChanges merges the latest swarm checkpoint into the user's active branch.
+// (PROJECT_VISION §22: Explicit approval required before modifying user's commit history).
+func (h *ProjectHandler) acceptChanges(w http.ResponseWriter, r *http.Request, id string) {
+	ref, err := h.registry.Lookup(id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+
+	ws, err := workspace.NewWorkspace("", ref.Root)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	commitHash, err := ws.AcceptChanges(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":     "accepted",
+		"commit":     commitHash,
+		"project_id": id,
+	})
 }
 
 // safeJoin resolves rel against root and refuses any result outside root.

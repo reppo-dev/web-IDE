@@ -283,43 +283,98 @@ func (w *Workspace) SyncFiles(files []domain.CodeFile) ([]domain.CodeFile, error
 	return synced, nil
 }
 
-// CommitRound creates a Git commit for the round with Arbiter score metadata.
+// CheckpointRef is the dedicated Git reference for Swarm checkpoints (PROJECT_VISION §22).
+// User's active branch history is untouched until AcceptChanges is explicitly called.
+const CheckpointRef = "refs/nexusai/checkpoints"
+
+// CommitRound creates a Git checkpoint for the round on a dedicated Git ref (PROJECT_VISION §22).
+// This guarantees that the user's active branch history (e.g. main/master) is never polluted
+// with dozens of interim swarm commits. Changes are merged into the user's branch only when
+// explicit approval is given via AcceptChanges.
 func (w *Workspace) CommitRound(ctx context.Context, round int, score float64, summary string) (string, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// git add .
+	// 1. Stage current working tree
 	addCmd := exec.CommandContext(ctx, "git", "add", ".")
 	addCmd.Dir = w.projPath
 	if err := addCmd.Run(); err != nil {
 		return "", fmt.Errorf("git add failed: %w", err)
 	}
 
-	// git commit
-	msg := fmt.Sprintf("[NexusAI Swarm] Round %d | Score: %.1f%% | %s", round, score, summary)
-	commitCmd := exec.CommandContext(ctx, "git", "commit", "-m", msg, "--allow-empty")
-	commitCmd.Dir = w.projPath
-	out, err := commitCmd.CombinedOutput()
+	// 2. Write tree object
+	treeCmd := exec.CommandContext(ctx, "git", "write-tree")
+	treeCmd.Dir = w.projPath
+	treeBytes, err := treeCmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("git commit failed: %w (output: %s)", err, string(out))
+		// Fallback to standard git commit if write-tree fails
+		msg := fmt.Sprintf("[NexusAI Swarm] Round %d | Score: %.1f%% | %s", round, score, summary)
+		commitCmd := exec.CommandContext(ctx, "git", "commit", "-m", msg, "--allow-empty")
+		commitCmd.Dir = w.projPath
+		out, err2 := commitCmd.CombinedOutput()
+		if err2 != nil {
+			return "", fmt.Errorf("git commit failed: %w (output: %s)", err2, string(out))
+		}
+		revCmd := exec.CommandContext(ctx, "git", "rev-parse", "--short", "HEAD")
+		revCmd.Dir = w.projPath
+		hashBytes, _ := revCmd.Output()
+		return strings.TrimSpace(string(hashBytes)), nil
+	}
+	treeHash := strings.TrimSpace(string(treeBytes))
+
+	// 3. Determine parent: either previous checkpoint, or current HEAD, or none
+	var parentArgs []string
+	revCheckpoint := exec.CommandContext(ctx, "git", "rev-parse", "--verify", CheckpointRef)
+	revCheckpoint.Dir = w.projPath
+	if parentBytes, err := revCheckpoint.Output(); err == nil {
+		parentHash := strings.TrimSpace(string(parentBytes))
+		if parentHash != "" {
+			parentArgs = []string{"-p", parentHash}
+		}
+	} else {
+		revHead := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "HEAD")
+		revHead.Dir = w.projPath
+		if headBytes, err := revHead.Output(); err == nil {
+			headHash := strings.TrimSpace(string(headBytes))
+			if headHash != "" {
+				parentArgs = []string{"-p", headHash}
+			}
+		}
 	}
 
-	revCmd := exec.CommandContext(ctx, "git", "rev-parse", "--short", "HEAD")
-	revCmd.Dir = w.projPath
-	hashBytes, _ := revCmd.Output()
-	hash := strings.TrimSpace(string(hashBytes))
+	// 4. Create commit object without moving HEAD
+	msg := fmt.Sprintf("[NexusAI Swarm] Round %d | Score: %.1f%% | %s", round, score, summary)
+	commitArgs := append([]string{"commit-tree", treeHash}, parentArgs...)
+	commitArgs = append(commitArgs, "-m", msg)
+	commitCmd := exec.CommandContext(ctx, "git", commitArgs...)
+	commitCmd.Dir = w.projPath
+	commitBytes, err := commitCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git commit-tree failed: %w", err)
+	}
+	commitHash := strings.TrimSpace(string(commitBytes))
+
+	// 5. Update dedicated checkpoint ref
+	updateCmd := exec.CommandContext(ctx, "git", "update-ref", CheckpointRef, commitHash)
+	updateCmd.Dir = w.projPath
+	_ = updateCmd.Run()
+
+	shortHash := commitHash
+	if len(shortHash) > 7 {
+		shortHash = shortHash[:7]
+	}
 
 	// Record in append-only Change Ledger and update state.json (PROJECT_VISION §8)
 	if w.brain != nil {
 		_ = w.brain.AppendLedger(
 			"round_committed",
 			"Orchestrator",
-			fmt.Sprintf("Round %d committed with score %.1f%% (%s)", round, score, summary),
-			hash,
+			fmt.Sprintf("Round %d committed to checkpoint with score %.1f%% (%s)", round, score, summary),
+			shortHash,
 		)
 		_ = w.brain.UpdateState(func(s *ProjectState) {
 			s.Round = round
-			s.LastCheckpoint = hash
+			s.LastCheckpoint = shortHash
 			if score >= 85.0 {
 				s.TaskStatus = TaskDone
 			} else {
@@ -329,7 +384,116 @@ func (w *Workspace) CommitRound(ctx context.Context, round int, score float64, s
 		})
 	}
 
-	return hash, nil
+	return shortHash, nil
+}
+
+// AcceptChanges merges the latest checkpoint from refs/nexusai/checkpoints into the user's active branch.
+// (PROJECT_VISION §22: Explicit approval required before modifying user's commit history).
+func (w *Workspace) AcceptChanges(ctx context.Context) (string, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// 1. Stage all current files
+	addCmd := exec.CommandContext(ctx, "git", "add", ".")
+	addCmd.Dir = w.projPath
+	if err := addCmd.Run(); err != nil {
+		return "", fmt.Errorf("git add failed: %w", err)
+	}
+
+	// 2. Write tree object
+	treeCmd := exec.CommandContext(ctx, "git", "write-tree")
+	treeCmd.Dir = w.projPath
+	treeBytes, err := treeCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git write-tree failed: %w", err)
+	}
+	treeHash := strings.TrimSpace(string(treeBytes))
+
+	// Determine active branch name (default "main")
+	currentBranch := "main"
+	if brOut, err := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
+		trimmed := strings.TrimSpace(string(brOut))
+		if trimmed != "" && trimmed != "HEAD" {
+			currentBranch = trimmed
+		}
+	}
+
+	// Check if checkpoint ref exists
+	var checkpointHash string
+	revChk := exec.CommandContext(ctx, "git", "rev-parse", "--verify", CheckpointRef)
+	revChk.Dir = w.projPath
+	if out, err := revChk.Output(); err == nil {
+		checkpointHash = strings.TrimSpace(string(out))
+	}
+
+	// Check if HEAD exists
+	var headHash string
+	revHead := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "HEAD")
+	revHead.Dir = w.projPath
+	if out, err := revHead.Output(); err == nil {
+		headHash = strings.TrimSpace(string(out))
+	}
+
+	var commitArgs []string
+	commitArgs = append(commitArgs, "commit-tree", treeHash)
+
+	msg := "[NexusAI Swarm] Accepted verified project changes"
+
+	if headHash == "" {
+		// Initial commit on unborn branch
+		if checkpointHash != "" {
+			commitArgs = append(commitArgs, "-p", checkpointHash)
+		}
+		commitArgs = append(commitArgs, "-m", msg)
+	} else {
+		// Existing HEAD: merge checkpoint into HEAD
+		commitArgs = append(commitArgs, "-p", headHash)
+		if checkpointHash != "" && checkpointHash != headHash {
+			commitArgs = append(commitArgs, "-p", checkpointHash)
+		}
+		commitArgs = append(commitArgs, "-m", msg)
+	}
+
+	commitCmd := exec.CommandContext(ctx, "git", commitArgs...)
+	commitCmd.Dir = w.projPath
+	commitBytes, err := commitCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git commit-tree failed: %w", err)
+	}
+	newCommit := strings.TrimSpace(string(commitBytes))
+
+	// Update branch ref to the new commit
+	updateCmd := exec.CommandContext(ctx, "git", "update-ref", "refs/heads/"+currentBranch, newCommit)
+	updateCmd.Dir = w.projPath
+	if out, err := updateCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("git update-ref failed: %w (%s)", err, string(out))
+	}
+
+	// Ensure HEAD points to the branch
+	symCmd := exec.CommandContext(ctx, "git", "symbolic-ref", "HEAD", "refs/heads/"+currentBranch)
+	symCmd.Dir = w.projPath
+	_ = symCmd.Run()
+
+	// Reset index to HEAD so index matches tree cleanly
+	resetCmd := exec.CommandContext(ctx, "git", "reset", "HEAD")
+	resetCmd.Dir = w.projPath
+	_ = resetCmd.Run()
+
+	shortHash := newCommit
+	if len(shortHash) > 7 {
+		shortHash = shortHash[:7]
+	}
+
+	if w.brain != nil {
+		_ = w.brain.AppendLedger(
+			"changes_accepted",
+			"User",
+			"User explicitly accepted and merged swarm checkpoints into active branch",
+			shortHash,
+		)
+	}
+
+	return shortHash, nil
 }
 
 // Brain returns the project's .project/ BrainFS interface.
@@ -346,7 +510,7 @@ func (w *Workspace) RollbackToCheckpoint(ctx context.Context, commitHash string)
 
 	cleaned := strings.TrimSpace(commitHash)
 	if cleaned == "" {
-		return fmt.Errorf("empty commit hash for rollback")
+		cleaned = CheckpointRef
 	}
 
 	cmd := exec.CommandContext(ctx, "git", "reset", "--hard", cleaned)

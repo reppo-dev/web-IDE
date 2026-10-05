@@ -100,3 +100,87 @@ func TestSQLiteMemoryStore(t *testing.T) {
 		t.Errorf("expected project DB file to exist at %s", projDBFile)
 	}
 }
+
+func TestMemoryEvidenceAndExpiration(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "nexus-mem-exp-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	store, err := NewSQLiteMemoryStore(tempDir)
+	if err != nil {
+		t.Fatalf("failed to init store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	projectID := "proj-evidence-test"
+
+	// 1. Entry with evidence
+	factMem := domain.MemoryEntry{
+		ProjectID:  projectID,
+		Agent:      domain.RoleTester,
+		Type:       domain.MemoryFact,
+		Content:    "All 25 Flutter unit tests pass cleanly",
+		Evidence:   "flutter test stdout: 00:00 +25: All tests passed!",
+		Confidence: 1.0,
+	}
+	if err := store.WriteProject(ctx, factMem); err != nil {
+		t.Fatalf("failed to write fact memory: %v", err)
+	}
+
+	// 2. Entry already expired (1 hour ago)
+	past := time.Now().Add(-1 * time.Hour)
+	expiredMem := domain.MemoryEntry{
+		ProjectID:  projectID,
+		Agent:      domain.RoleCoder,
+		Type:       domain.MemoryProposal,
+		Content:    "Temporary refactor suggestion for review",
+		ExpiresAt:  &past,
+		Confidence: 0.8,
+	}
+	if err := store.WriteProject(ctx, expiredMem); err != nil {
+		t.Fatalf("failed to write expired memory: %v", err)
+	}
+
+	// 3. Entry with future expiry (1 hour later)
+	future := time.Now().Add(1 * time.Hour)
+	validExpMem := domain.MemoryEntry{
+		ProjectID:  projectID,
+		Agent:      domain.RoleSecurity,
+		Type:       domain.MemoryWarning,
+		Content:    "Lease lock warning for active session",
+		ExpiresAt:  &future,
+		Confidence: 0.9,
+	}
+	if err := store.WriteProject(ctx, validExpMem); err != nil {
+		t.Fatalf("failed to write future expiry memory: %v", err)
+	}
+
+	// Query memories - should get factMem and validExpMem, but NOT expiredMem
+	results, err := store.QueryProject(ctx, projectID, QueryFilter{})
+	if err != nil {
+		t.Fatalf("failed to query memories: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 non-expired memories, got %d", len(results))
+	}
+
+	foundFact := false
+	for _, r := range results {
+		if r.Type == domain.MemoryFact {
+			foundFact = true
+			if r.Evidence != factMem.Evidence {
+				t.Errorf("evidence mismatch: expected %q, got %q", factMem.Evidence, r.Evidence)
+			}
+		}
+		if r.Type == domain.MemoryProposal {
+			t.Errorf("expired memory should have been excluded from query results")
+		}
+	}
+	if !foundFact {
+		t.Errorf("fact memory with evidence was not returned")
+	}
+}
+

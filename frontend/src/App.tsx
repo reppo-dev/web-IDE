@@ -636,6 +636,60 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleAcceptChanges = async () => {
+    if (!projectId) {
+      setTerminalLogs((prev) => [
+        ...prev,
+        "[Git §22] No active project opened to accept changes.",
+      ]);
+      return;
+    }
+
+    try {
+      setTerminalLogs((prev) => [
+        ...prev,
+        `[Git §22] Merging swarm checkpoints into active branch for project ${projectId}...`,
+      ]);
+      const res = await fetch(`/api/projects/${projectId}/accept`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setTerminalLogs((prev) => [
+        ...prev,
+        `[Git §22] ✓ Changes accepted! Swarm checkpoint merged to active branch (commit: ${data.commit}).`,
+      ]);
+
+      // Refresh project file tree
+      const treeRes = await fetch(`/api/projects/${projectId}`);
+      if (treeRes.ok) {
+        const tree = await treeRes.json();
+        if (tree?.files) {
+          const treeFiles: CodeFile[] = (tree.files || []).map((f: { path: string }) => {
+            const ext = f.path.split('.').pop()?.toLowerCase() || '';
+            let lang = 'plaintext';
+            if (ext === 'go') lang = 'go';
+            else if (ext === 'ts' || ext === 'tsx') lang = 'typescript';
+            else if (ext === 'js' || ext === 'jsx') lang = 'javascript';
+            else if (ext === 'py') lang = 'python';
+            else if (ext === 'json') lang = 'json';
+            else if (ext === 'md') lang = 'markdown';
+            return { path: f.path, language: lang, content: '' };
+          });
+          setFiles(treeFiles);
+        }
+      }
+    } catch (e: any) {
+      setTerminalLogs((prev) => [
+        ...prev,
+        `[Git Error] Failed to accept changes: ${e?.message || e}`,
+      ]);
+    }
+  };
+
   const handleCloseTab = (path: string) => {
     const updated = openFiles.filter((p) => p !== path);
     setOpenFiles(updated);
@@ -865,9 +919,7 @@ export const App: React.FC = () => {
             onUpdateAgentModel={handleUpdateAgentModel}
             onApplyPreset={handleApplyPreset}
             onSendPrompt={handleSendPrompt}
-            onAcceptChanges={() => {
-              setTerminalLogs((prev) => [...prev, "[Composer] Changes accepted and merged into workspace."]);
-            }}
+            onAcceptChanges={handleAcceptChanges}
             thinkingAgent={thinkingAgent}
             stalled={stalled}
             connected={isConnected}

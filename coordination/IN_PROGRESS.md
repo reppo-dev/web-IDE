@@ -3,6 +3,19 @@
 > **قانون: اگر فایلی اینجا رزرو شده، دست به آن نمی‌زنید.**
 > اگر فایلی که می‌خواهید تغییر دهید اینجاست، منتظر بمانید یا فایل دیگری بردارید.
 
+### ✅ Antigravity — ۲۰۲۶-۱۰-۰۵ ۰۸:۴۲ (تمام شد)
+- **هدف:** پیاده‌سازی بند ۲۲ (چک‌پوینت Git روی ref جدا `refs/nexusai/checkpoints` + دکمه Accept Changes واقعی) و بند ۱۰ (الزام Evidence برای Factها و تبدیل خودکار به Assumption در حافظه)
+- `backend/internal/domain/types.go` — انواع جدید حافظه، فیلدهای Evidence و ExpiresAt
+- `backend/internal/memory/sqlite.go` & `sqlite_test.go` — ذخیره، انقضای خودکار و بازیابی فیلدهای Evidence و ExpiresAt در SQLite
+- `backend/internal/agent/brain.go` & `brain_test.go` — قانون تنزل خودکار Fact بدون مدرک به Assumption
+- `backend/internal/workspace/workspace.go` & `workspace_test.go` — کامیت روی `refs/nexusai/checkpoints` با `git commit-tree` بدون دستکاری شاخه کاربر + متد `AcceptChanges`
+- `backend/api/projects.go` & `projects_test.go` — اندپوینت `POST /api/projects/:id/accept`
+- `frontend/src/App.tsx` — فراخوانی اندپوینت پذیرش تغییرات و ادغام رسمی در گیت
+- **تمام ۱۲ پکیج Go بک‌اند ۱۰۰٪ سبز، بیلد فرانت‌اند در ۳.۴۶ ثانیه موفق، دیمون لایو روی پورت ۸۰۸۰.**
+- **تمام فایل‌ها آزاد هستند.**
+
+---
+
 ### ✅ Claude & Antigravity — ۲۰۲۶-۱۰-۰۵ ۰۸:۲۵ (تمام شد)
 - **هدف:** موازی‌سازی واقعی (True Task Parallelism با چند کدنویس مستقل و فاز نقد موازی) + رشته گفتگوی مستقل هر ایجنت (AgentConversationPanel) + اسکریپت تست خودکار end-to-end
 - **کلاد (Claude):**

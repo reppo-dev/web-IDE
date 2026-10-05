@@ -64,3 +64,69 @@ func TestProjectBrain_RecordAndCategoriseEntries(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectBrain_FactWithoutEvidenceDowngradesToAssumption(t *testing.T) {
+	tempDir := t.TempDir()
+	store, err := memory.NewSQLiteMemoryStore(tempDir)
+	if err != nil {
+		t.Fatalf("failed to create memory store: %v", err)
+	}
+	defer store.Close()
+
+	brain := NewProjectBrain(store)
+	ctx := context.Background()
+	proj := "strict-evidence-project"
+
+	// 1. Fact WITH evidence -> Must stay domain.MemoryFact
+	err = brain.RecordFact(ctx, proj, domain.RoleTester, "All tests pass", 1, "go test stdout: PASS 100%")
+	if err != nil {
+		t.Fatalf("failed to record fact with evidence: %v", err)
+	}
+
+	// 2. Fact WITHOUT evidence -> Must be downgraded to domain.MemoryAssumption (PROJECT_VISION §10)
+	err = brain.RecordFact(ctx, proj, domain.RoleCoder, "Service handles 100k requests/sec", 1) // no evidence provided
+	if err != nil {
+		t.Fatalf("failed to record fact without evidence: %v", err)
+	}
+
+	// Query store to inspect underlying stored types
+	entries, err := store.QueryProject(ctx, proj, memory.QueryFilter{})
+	if err != nil {
+		t.Fatalf("failed to query entries: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+
+	var foundFact, foundAssumption bool
+	for _, e := range entries {
+		if e.Content == "All tests pass" {
+			foundFact = true
+			if e.Type != domain.MemoryFact {
+				t.Errorf("expected MemoryFact for entry with evidence, got %v", e.Type)
+			}
+			if e.Evidence != "go test stdout: PASS 100%" {
+				t.Errorf("expected evidence to be preserved, got %q", e.Evidence)
+			}
+		}
+		if e.Content == "Service handles 100k requests/sec" {
+			foundAssumption = true
+			if e.Type != domain.MemoryAssumption {
+				t.Errorf("expected MemoryAssumption for fact lacking evidence (PROJECT_VISION §10), got %v", e.Type)
+			}
+		}
+	}
+	if !foundFact || !foundAssumption {
+		t.Fatalf("missing expected entries in store (foundFact: %v, foundAssumption: %v)", foundFact, foundAssumption)
+	}
+
+	// Build context and check headers
+	contextStr := brain.BuildContext(ctx, proj)
+	if !strings.Contains(contextStr, "--- VERIFIED FACTS (With Concrete Evidence) ---") {
+		t.Errorf("expected verified facts header in context:\n%s", contextStr)
+	}
+	if !strings.Contains(contextStr, "--- UNVERIFIED ASSUMPTIONS (Need Evidence / Verification) ---") {
+		t.Errorf("expected unverified assumptions header in context:\n%s", contextStr)
+	}
+}
+

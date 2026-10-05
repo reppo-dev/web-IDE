@@ -93,9 +93,11 @@ func (s *SQLiteMemoryStore) getProjectDB(projectID string) (*sql.DB, error) {
 		agent       TEXT NOT NULL,
 		type        TEXT NOT NULL,
 		content     TEXT NOT NULL,
+		evidence    TEXT,
 		tags        TEXT,
 		round       INTEGER DEFAULT 0,
 		confidence  REAL DEFAULT 1.0,
+		expires_at  DATETIME,
 		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
@@ -106,6 +108,10 @@ func (s *SQLiteMemoryStore) getProjectDB(projectID string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("failed to init project schema: %w", err)
 	}
+
+	// Dynamic column migrations for existing databases
+	_, _ = db.Exec("ALTER TABLE memories ADD COLUMN evidence TEXT;")
+	_, _ = db.Exec("ALTER TABLE memories ADD COLUMN expires_at DATETIME;")
 
 	s.projectDBs[projectID] = db
 	return db, nil
@@ -131,19 +137,26 @@ func (s *SQLiteMemoryStore) WriteProject(ctx context.Context, entry domain.Memor
 
 	tagsJSON, _ := json.Marshal(entry.Tags)
 
+	var expiresAtVal interface{}
+	if entry.ExpiresAt != nil && !entry.ExpiresAt.IsZero() {
+		expiresAtVal = entry.ExpiresAt.UTC().Format("2006-01-02 15:04:05")
+	}
+
 	query := `
-	INSERT INTO memories (id, project_id, agent, type, content, tags, round, confidence, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO memories (id, project_id, agent, type, content, evidence, tags, round, confidence, expires_at, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		content = excluded.content,
+		evidence = excluded.evidence,
 		tags = excluded.tags,
 		confidence = excluded.confidence,
+		expires_at = excluded.expires_at,
 		updated_at = excluded.updated_at
 	`
 	_, err = db.ExecContext(ctx, query,
 		entry.ID, entry.ProjectID, string(entry.Agent), string(entry.Type),
-		entry.Content, string(tagsJSON), entry.Round, entry.Confidence,
-		entry.CreatedAt, entry.UpdatedAt,
+		entry.Content, entry.Evidence, string(tagsJSON), entry.Round, entry.Confidence,
+		expiresAtVal, entry.CreatedAt, entry.UpdatedAt,
 	)
 	return err
 }
@@ -175,7 +188,10 @@ func (s *SQLiteMemoryStore) QueryProject(ctx context.Context, projectID string, 
 		args = append(args, "%"+filter.Tag+"%")
 	}
 
-	query := "SELECT id, project_id, agent, type, content, tags, round, confidence, created_at, updated_at FROM memories"
+	// Exclude expired memories (PROJECT_VISION §10)
+	conditions = append(conditions, "(expires_at IS NULL OR expires_at > datetime('now'))")
+
+	query := "SELECT id, project_id, agent, type, content, COALESCE(evidence, ''), tags, round, confidence, expires_at, created_at, updated_at FROM memories"
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
@@ -194,17 +210,25 @@ func (s *SQLiteMemoryStore) QueryProject(ctx context.Context, projectID string, 
 	for rows.Next() {
 		var m domain.MemoryEntry
 		var agentStr, typeStr, tagsStr string
+		var evidenceStr string
+		var expiresAtRaw sql.NullString
 		var createdAtStr, updatedAtStr string
 		err := rows.Scan(
 			&m.ID, &m.ProjectID, &agentStr, &typeStr, &m.Content,
-			&tagsStr, &m.Round, &m.Confidence, &createdAtStr, &updatedAtStr,
+			&evidenceStr, &tagsStr, &m.Round, &m.Confidence,
+			&expiresAtRaw, &createdAtStr, &updatedAtStr,
 		)
 		if err != nil {
 			return nil, err
 		}
 		m.Agent = domain.AgentRole(agentStr)
 		m.Type = domain.MemoryType(typeStr)
+		m.Evidence = evidenceStr
 		_ = json.Unmarshal([]byte(tagsStr), &m.Tags)
+		if expiresAtRaw.Valid && expiresAtRaw.String != "" {
+			t := parseTime(expiresAtRaw.String)
+			m.ExpiresAt = &t
+		}
 		m.CreatedAt = parseTime(createdAtStr)
 		m.UpdatedAt = parseTime(updatedAtStr)
 		results = append(results, m)

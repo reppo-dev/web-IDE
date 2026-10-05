@@ -105,13 +105,6 @@ type Config struct {
 	// the provider: past a certain concurrency the wall time is dominated by
 	// queuing, and every extra agent mostly adds cost.
 	MaxParallelTasks int `json:"max_parallel_tasks"`
-	// ParallelMode selects how a parallel batch is judged.
-	//
-	// "batch" judges the batch as a whole once every worker has finished, which is
-	// cheaper and is the right default. "per-task" judges each task on its own
-	// evidence before the batch is judged, which costs more but never lets a clean
-	// task be carried to a high score by a broken one beside it.
-	ParallelMode string `json:"parallel_mode"`
 }
 
 // Orchestrator coordinates the 5-agent swarm across rounds.

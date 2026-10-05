@@ -79,9 +79,11 @@ const (
 	MemoryInsight    MemoryType = "insight"
 	MemoryInvariant  MemoryType = "invariant"
 	MemoryFact       MemoryType = "fact"
+	MemoryAssumption MemoryType = "assumption"
 	MemoryWarning     MemoryType = "warning"
 	MemoryProposal   MemoryType = "proposal"
 	MemoryContract   MemoryType = "contract"
+	MemoryTestResult MemoryType = "test_result"
 )
 
 // MemoryEntry represents a persistent Mem0-style memory block.
@@ -91,9 +93,11 @@ type MemoryEntry struct {
 	Agent      AgentRole  `json:"agent"`
 	Type       MemoryType `json:"type"`
 	Content    string     `json:"content"`
+	Evidence   string     `json:"evidence,omitempty"`
 	Tags       []string   `json:"tags"`
 	Round      int        `json:"round,omitempty"`
 	Confidence float64    `json:"confidence"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 }

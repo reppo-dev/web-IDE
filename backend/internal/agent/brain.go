@@ -52,6 +52,8 @@ func (b *ProjectBrain) BuildContext(ctx context.Context, projectID string) strin
 	var decisions []string
 	var contracts []string
 	var facts []string
+	var assumptions []string
+	var proposals []string
 	var warnings []string
 	var mistakes []string
 
@@ -61,6 +63,9 @@ func (b *ProjectBrain) BuildContext(ctx context.Context, projectID string) strin
 			continue
 		}
 		item := fmt.Sprintf("[%s]: %s", e.Agent, content)
+		if e.Evidence != "" {
+			item = fmt.Sprintf("[%s]: %s (Evidence: %s)", e.Agent, content, e.Evidence)
+		}
 
 		switch e.Type {
 		case domain.MemoryInvariant:
@@ -71,6 +76,10 @@ func (b *ProjectBrain) BuildContext(ctx context.Context, projectID string) strin
 			contracts = append(contracts, item)
 		case domain.MemoryFact:
 			facts = append(facts, item)
+		case domain.MemoryAssumption:
+			assumptions = append(assumptions, item)
+		case domain.MemoryProposal:
+			proposals = append(proposals, item)
 		case domain.MemoryWarning:
 			warnings = append(warnings, item)
 		case domain.MemoryMistake:
@@ -113,9 +122,23 @@ func (b *ProjectBrain) BuildContext(ctx context.Context, projectID string) strin
 	}
 
 	if len(facts) > 0 {
-		sb.WriteString("\n--- VERIFIED FACTS ---\n")
+		sb.WriteString("\n--- VERIFIED FACTS (With Concrete Evidence) ---\n")
 		for _, f := range facts {
 			sb.WriteString("- " + f + "\n")
+		}
+	}
+
+	if len(assumptions) > 0 {
+		sb.WriteString("\n--- UNVERIFIED ASSUMPTIONS (Need Evidence / Verification) ---\n")
+		for _, a := range assumptions {
+			sb.WriteString("- " + a + "\n")
+		}
+	}
+
+	if len(proposals) > 0 {
+		sb.WriteString("\n--- PENDING PROPOSALS (Awaiting Consensus) ---\n")
+		for _, p := range proposals {
+			sb.WriteString("- " + p + "\n")
 		}
 	}
 
@@ -152,9 +175,29 @@ func (b *ProjectBrain) RecordContract(ctx context.Context, projectID string, age
 	return b.recordEntry(ctx, projectID, agent, domain.MemoryContract, contract, round, 0.95)
 }
 
-// RecordFact saves a verified codebase fact.
-func (b *ProjectBrain) RecordFact(ctx context.Context, projectID string, agent domain.AgentRole, fact string, round int) error {
-	return b.recordEntry(ctx, projectID, agent, domain.MemoryFact, fact, round, 1.0)
+// RecordFact saves a verified codebase fact with concrete evidence.
+// PROJECT_VISION §10: A FACT without evidence is NOT allowed. If evidence is missing,
+// the assertion is automatically downgraded to domain.MemoryAssumption to protect
+// ground truth from hallucination or unproven assumptions.
+func (b *ProjectBrain) RecordFact(ctx context.Context, projectID string, agent domain.AgentRole, fact string, round int, evidence ...string) error {
+	ev := ""
+	if len(evidence) > 0 {
+		ev = strings.TrimSpace(evidence[0])
+	}
+	if ev == "" {
+		return b.recordEntryWithEvidence(ctx, projectID, agent, domain.MemoryAssumption, fact, "", round, 0.70)
+	}
+	return b.recordEntryWithEvidence(ctx, projectID, agent, domain.MemoryFact, fact, ev, round, 1.0)
+}
+
+// RecordAssumption explicitly records an assumption that requires evidence.
+func (b *ProjectBrain) RecordAssumption(ctx context.Context, projectID string, agent domain.AgentRole, assumption string, round int) error {
+	return b.recordEntryWithEvidence(ctx, projectID, agent, domain.MemoryAssumption, assumption, "", round, 0.70)
+}
+
+// RecordProposal records an actionable proposal awaiting human or swarm verdict.
+func (b *ProjectBrain) RecordProposal(ctx context.Context, projectID string, agent domain.AgentRole, proposal string, round int) error {
+	return b.recordEntryWithEvidence(ctx, projectID, agent, domain.MemoryProposal, proposal, "", round, 0.80)
 }
 
 // RecordWarning saves an active risk or vulnerability warning.
@@ -163,6 +206,10 @@ func (b *ProjectBrain) RecordWarning(ctx context.Context, projectID string, agen
 }
 
 func (b *ProjectBrain) recordEntry(ctx context.Context, projectID string, agent domain.AgentRole, memType domain.MemoryType, content string, round int, conf float64) error {
+	return b.recordEntryWithEvidence(ctx, projectID, agent, memType, content, "", round, conf)
+}
+
+func (b *ProjectBrain) recordEntryWithEvidence(ctx context.Context, projectID string, agent domain.AgentRole, memType domain.MemoryType, content string, evidence string, round int, conf float64) error {
 	if b == nil || b.store == nil || projectID == "" || strings.TrimSpace(content) == "" {
 		return nil
 	}
@@ -172,6 +219,7 @@ func (b *ProjectBrain) recordEntry(ctx context.Context, projectID string, agent 
 		Agent:      agent,
 		Type:       memType,
 		Content:    strings.TrimSpace(content),
+		Evidence:   strings.TrimSpace(evidence),
 		Round:      round,
 		Confidence: conf,
 		CreatedAt:  time.Now(),
