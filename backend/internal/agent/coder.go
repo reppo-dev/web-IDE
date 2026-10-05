@@ -56,8 +56,15 @@ Your role:
 	var projectCode string
 	if sCtx.WorkspacePath != "" {
 		engine := NewContextEngine(sCtx.WorkspacePath)
-		if code, err := engine.BuildCodeContext(sCtx.UserPrompt, 8); err == nil && code != "" {
+		var focusFiles []string
+		taskPrompt := sCtx.UserPrompt
+		if task := sCtx.ActiveTaskSnapshot(); task != nil {
+			focusFiles = task.Files
+			taskPrompt = fmt.Sprintf("%s %s %s", sCtx.UserPrompt, task.Title, strings.Join(task.Files, " "))
+		}
+		if code, manifest, err := engine.BuildCodeContextWithManifest(taskPrompt, focusFiles, 8); err == nil && code != "" {
 			projectCode = code
+			sCtx.SetContextManifest(manifest)
 		}
 		if structure, err := engine.BuildStructure(); err == nil && structure != "" {
 			projectCode += "\n--- PROJECT STRUCTURE ---\n" + structure

@@ -256,3 +256,60 @@ func TestBuildStructureBoundsLongLists(t *testing.T) {
 		t.Errorf("the stack marker was lost to truncation:\n%s", structure[:min(len(structure), 400)])
 	}
 }
+
+func TestContextEngineFocusFilesPrioritized(t *testing.T) {
+	root := t.TempDir()
+	writeContextTestFile(t, root, "auth/login.go", "package auth\nfunc Login() {}")
+	writeContextTestFile(t, root, "billing/invoice.go", "package billing\nfunc Invoice() {}")
+	writeContextTestFile(t, root, "db/models.go", "package db\nfunc Schema() {}")
+
+	engine := NewContextEngine(root)
+	// Query is about "login", but focus file is "db/models.go"
+	files, scores, err := engine.SelectRelevantFilesWithFocus("fix the login flow", []string{"db/models.go"}, 3)
+	if err != nil {
+		t.Fatalf("SelectRelevantFilesWithFocus: %v", err)
+	}
+	if len(files) < 2 {
+		t.Fatalf("expected at least 2 files, got %d", len(files))
+	}
+	// Focus file must be first
+	if files[0].RelPath != "db/models.go" {
+		t.Errorf("expected focus file db/models.go to be ranked first, got %s", files[0].RelPath)
+	}
+	if scores["db/models.go"] < 1000 {
+		t.Errorf("expected score >= 1000 for focus file, got %d", scores["db/models.go"])
+	}
+}
+
+func TestBuildCodeContextWithManifestRecordsDetails(t *testing.T) {
+	root := t.TempDir()
+	writeContextTestFile(t, root, "pkg/a.go", "package pkg\nfunc A() {}")
+	writeContextTestFile(t, root, "pkg/b.go", "package pkg\nfunc B() {}")
+	writeContextTestFile(t, root, "pkg/c.go", "package pkg\nfunc C() {}")
+
+	engine := NewContextEngine(root)
+	engine.SetBudget(1024, 40) // low total budget so third file gets omitted
+
+	code, manifest, err := engine.BuildCodeContextWithManifest("pkg function", []string{"pkg/a.go"}, 5)
+	if err != nil {
+		t.Fatalf("BuildCodeContextWithManifest: %v", err)
+	}
+	if manifest == nil {
+		t.Fatal("expected non-nil manifest")
+	}
+	if len(manifest.IncludedFiles) == 0 {
+		t.Fatal("expected at least 1 included file")
+	}
+	if manifest.IncludedFiles[0].Path != "pkg/a.go" {
+		t.Errorf("expected pkg/a.go as first included file, got %s", manifest.IncludedFiles[0].Path)
+	}
+	if manifest.TotalBytes <= 0 {
+		t.Errorf("expected TotalBytes > 0, got %d", manifest.TotalBytes)
+	}
+	if manifest.EstimatedTokens <= 0 {
+		t.Errorf("expected EstimatedTokens > 0, got %d", manifest.EstimatedTokens)
+	}
+	if !strings.Contains(code, "pkg/a.go") {
+		t.Errorf("expected code to contain pkg/a.go:\n%s", code)
+	}
+}

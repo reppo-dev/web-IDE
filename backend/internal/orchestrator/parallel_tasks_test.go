@@ -400,3 +400,65 @@ func TestSerialByDefault(t *testing.T) {
 		t.Errorf("a zero-value orchestrator should have a budget of 1, got %d", got)
 	}
 }
+
+// TestBatchMadeProgressDetectsAStuckBatch covers the livelock guard.
+//
+// Every task in this batch was blocked, so nothing changed. A loop that treated
+// this as a completed round would advance its counter over the same stuck state
+// forever — no error, no log, just an agent burning money until something else
+// stopped it.
+func TestBatchMadeProgressDetectsAStuckBatch(t *testing.T) {
+	stuck := []ParallelOutcome{
+		{Task: &domain.ProjectTask{ID: "T-001"}, Skipped: "held by coder-1"},
+		{Task: &domain.ProjectTask{ID: "T-002"}, Skipped: "held by coder-2"},
+	}
+	if batchMadeProgress(stuck) {
+		t.Error("a batch where every task was skipped made no progress")
+	}
+
+	partial := []ParallelOutcome{
+		{Task: &domain.ProjectTask{ID: "T-001"}, Skipped: "held by coder-1"},
+		{Task: &domain.ProjectTask{ID: "T-002"}},
+	}
+	if !batchMadeProgress(partial) {
+		t.Error("one task running is enough to count as progress")
+	}
+
+	if batchMadeProgress(nil) {
+		t.Error("an empty batch made no progress")
+	}
+}
+
+// TestPlanProgressPercentMovesOnlyWhenATaskCloses is what the guard in the run
+// loop relies on. If the percentage moved for any reason other than real
+// progress, the loop would treat a stuck batch as a finished round.
+func TestPlanProgressPercentMovesOnlyWhenATaskCloses(t *testing.T) {
+	sCtx := newParallelContext(
+		domain.ProjectTask{ID: "T-001", State: domain.TaskTodo, Files: []string{"lib/a.dart"}},
+		domain.ProjectTask{ID: "T-002", State: domain.TaskTodo, Files: []string{"lib/b.dart"}},
+	)
+
+	before := sCtx.PlanProgressPercent()
+	if before != 0 {
+		t.Errorf("a fresh plan should be 0 percent, got %d", before)
+	}
+
+	// A task sent back to rework is not progress.
+	sCtx.ClaimTasksForBatch(sCtx.AvailableTasks())
+	sCtx.SendTaskBackToReworkAs("T-001", "blocked")
+	if after := sCtx.PlanProgressPercent(); after != before {
+		t.Errorf("a reworked task must not count as progress: %d then %d", before, after)
+	}
+
+	// A task returned to the queue is not progress either.
+	sCtx.ReturnTaskToQueue("T-002")
+	if after := sCtx.PlanProgressPercent(); after != before {
+		t.Errorf("a requeued task must not count as progress: %d then %d", before, after)
+	}
+
+	// Only a closed task moves it.
+	sCtx.CompleteTaskAs("T-001", []string{"lib/a.dart"})
+	if after := sCtx.PlanProgressPercent(); after <= before {
+		t.Errorf("closing a task should raise progress: %d then %d", before, after)
+	}
+}

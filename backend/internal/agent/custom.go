@@ -583,9 +583,16 @@ func (c *CustomAgent) buildWork(ctx context.Context, sCtx *SwarmContext) string 
 
 	if sCtx.WorkspacePath != "" && c.spec.Role != domain.RoleArbiter {
 		engine := NewContextEngine(sCtx.WorkspacePath)
-		if code, err := engine.BuildCodeContext(sCtx.UserPrompt, 8); err == nil && code != "" {
+		var focusFiles []string
+		taskPrompt := sCtx.UserPrompt
+		if task := sCtx.ActiveTaskSnapshot(); task != nil {
+			focusFiles = task.Files
+			taskPrompt = fmt.Sprintf("%s %s %s", sCtx.UserPrompt, task.Title, strings.Join(task.Files, " "))
+		}
+		if code, manifest, err := engine.BuildCodeContextWithManifest(taskPrompt, focusFiles, 8); err == nil && code != "" {
 			b.WriteString("\n--- EXISTING PROJECT CODE ---\n")
 			b.WriteString(code)
+			sCtx.SetContextManifest(manifest)
 		}
 
 		// Make the boundary explicit. Without this a model may try to read or

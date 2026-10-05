@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ContextEngine assembles the real project state that an agent needs before it
@@ -28,6 +29,37 @@ func NewContextEngine(root string) *ContextEngine {
 		maxFileBytes:  16 * 1024,
 		maxTotalBytes: 120 * 1024,
 	}
+}
+
+// SetBudget configures the per-file and total byte limits for context assembly.
+// Fulfills Section 17 & 26 (Context Budget).
+func (e *ContextEngine) SetBudget(maxFileBytes, maxTotalBytes int) {
+	if maxFileBytes > 0 {
+		e.maxFileBytes = maxFileBytes
+	}
+	if maxTotalBytes > 0 {
+		e.maxTotalBytes = maxTotalBytes
+	}
+}
+
+// ContextManifest records the exact files, sizes and scores passed to an agent.
+// Fulfills Section 17 (Context Manifest) and Section 37 (Observability).
+type ContextManifest struct {
+	Query           string         `json:"query"`
+	FocusFiles      []string       `json:"focus_files,omitempty"`
+	IncludedFiles   []ManifestFile `json:"included_files"`
+	OmittedFiles    []string       `json:"omitted_files,omitempty"`
+	TotalBytes      int            `json:"total_bytes"`
+	EstimatedTokens int            `json:"estimated_tokens"`
+	Timestamp       time.Time      `json:"timestamp"`
+}
+
+// ManifestFile describes one source file included in the context.
+type ManifestFile struct {
+	Path      string `json:"path"`
+	Bytes     int    `json:"bytes"`
+	Truncated bool   `json:"truncated"`
+	Score     int    `json:"score"`
 }
 
 // skipDirs are directories that never carry project source worth reading.
@@ -186,20 +218,39 @@ func rankFiles(e *ContextEngine, files []ProjectFile, keywords []string) map[str
 	return scores
 }
 
-// SelectRelevantFiles picks the files most likely to matter for a request.
-func (e *ContextEngine) SelectRelevantFiles(prompt string, limit int) ([]ProjectFile, error) {
+// SelectRelevantFilesWithFocus picks the files most likely to matter for a request,
+// prioritizing files explicitly designated as focus targets (e.g. from an active task).
+func (e *ContextEngine) SelectRelevantFilesWithFocus(prompt string, focusFiles []string, limit int) ([]ProjectFile, map[string]int, error) {
 	files, err := e.ListSourceFiles()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(files) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	keywords := relevantKeywords(prompt)
 	scores := rankFiles(e, files, keywords)
 
-	// When nothing matched the keywords, fall back to recency: the most
+	// Focus files get an overwhelming priority boost so that expected files
+	// from the active task are placed before general keyword matches.
+	if len(focusFiles) > 0 {
+		focusMap := make(map[string]bool, len(focusFiles))
+		for _, ff := range focusFiles {
+			clean := filepath.ToSlash(filepath.Clean(ff))
+			clean = strings.TrimPrefix(clean, "./")
+			focusMap[clean] = true
+			focusMap[strings.ToLower(clean)] = true
+		}
+		for _, f := range files {
+			lower := strings.ToLower(f.RelPath)
+			if focusMap[f.RelPath] || focusMap[lower] {
+				scores[f.RelPath] += 1000
+			}
+		}
+	}
+
+	// When nothing matched the keywords or focus, fall back to recency: the most
 	// recently touched files are what the user is most likely working on.
 	if maxScore := maxInt(scores); maxScore == 0 {
 		sort.Slice(files, func(i, j int) bool { return files[i].ModTime > files[j].ModTime })
@@ -212,36 +263,56 @@ func (e *ContextEngine) SelectRelevantFiles(prompt string, limit int) ([]Project
 	if limit > 0 && len(files) > limit {
 		files = files[:limit]
 	}
-	return files, nil
+	return files, scores, nil
 }
 
-// BuildCodeContext reads the selected files and renders them as a prompt block.
-// Files are included whole until the byte budget runs out; anything skipped is
-// listed by name so the model still knows what it has not seen.
-func (e *ContextEngine) BuildCodeContext(prompt string, maxFiles int) (string, error) {
-	files, err := e.SelectRelevantFiles(prompt, maxFiles)
+// SelectRelevantFiles picks the files most likely to matter for a request.
+func (e *ContextEngine) SelectRelevantFiles(prompt string, limit int) ([]ProjectFile, error) {
+	files, _, err := e.SelectRelevantFilesWithFocus(prompt, nil, limit)
+	return files, err
+}
+
+// BuildCodeContextWithManifest reads the selected files and renders them as a prompt block,
+// returning the formatted code and a ContextManifest recording what was included and omitted.
+func (e *ContextEngine) BuildCodeContextWithManifest(prompt string, focusFiles []string, maxFiles int) (string, *ContextManifest, error) {
+	files, scores, err := e.SelectRelevantFilesWithFocus(prompt, focusFiles, maxFiles)
 	if err != nil {
-		return "", err
+		return "", nil, err
+	}
+	manifest := &ContextManifest{
+		Query:         prompt,
+		FocusFiles:    focusFiles,
+		IncludedFiles: make([]ManifestFile, 0, len(files)),
+		Timestamp:     time.Now().UTC(),
 	}
 	if len(files) == 0 {
-		return "", nil
+		return "", manifest, nil
 	}
 
 	var b strings.Builder
 	remaining := e.maxTotalBytes
-	omitted := 0
 
-	for _, f := range files {
+	for i, f := range files {
 		abs, safeErr := SafeReadPath(e.root, f.RelPath)
 		if safeErr != nil {
-			omitted++
+			manifest.OmittedFiles = append(manifest.OmittedFiles, f.RelPath)
 			continue
 		}
 		data, readErr := os.ReadFile(abs)
 		if readErr != nil {
-			omitted++
+			manifest.OmittedFiles = append(manifest.OmittedFiles, f.RelPath)
 			continue
 		}
+
+		if remaining <= 0 {
+			// Total budget exhausted: omit all remaining candidate files
+			for _, rem := range files[i:] {
+				manifest.OmittedFiles = append(manifest.OmittedFiles, rem.RelPath)
+			}
+			break
+		}
+
+		origLen := len(data)
 		if len(data) > e.maxFileBytes {
 			data = data[:e.maxFileBytes]
 		}
@@ -249,9 +320,17 @@ func (e *ContextEngine) BuildCodeContext(prompt string, maxFiles int) (string, e
 			data = data[:remaining]
 		}
 
-		truncated := len(data) < int(f.Size)
-
+		truncated := len(data) < origLen
 		remaining -= len(data)
+		manifest.TotalBytes += len(data)
+
+		manifest.IncludedFiles = append(manifest.IncludedFiles, ManifestFile{
+			Path:      f.RelPath,
+			Bytes:     len(data),
+			Truncated: truncated,
+			Score:     scores[f.RelPath],
+		})
+
 		b.WriteString(fmt.Sprintf("\n--- FILE: %s ---\n", f.RelPath))
 		b.Write(data)
 		if truncated {
@@ -260,10 +339,20 @@ func (e *ContextEngine) BuildCodeContext(prompt string, maxFiles int) (string, e
 		b.WriteString("\n")
 	}
 
-	if omitted > 0 {
-		b.WriteString(fmt.Sprintf("\n[%d more project files not shown]\n", omitted))
+	if len(manifest.OmittedFiles) > 0 {
+		b.WriteString(fmt.Sprintf("\n[%d more project files not shown]\n", len(manifest.OmittedFiles)))
 	}
-	return b.String(), nil
+	// Estimated tokens: ~4 bytes per token for typical source code
+	manifest.EstimatedTokens = (manifest.TotalBytes + 3) / 4
+	return b.String(), manifest, nil
+}
+
+// BuildCodeContext reads the selected files and renders them as a prompt block.
+// Files are included whole until the byte budget runs out; anything skipped is
+// listed by name so the model still knows what it has not seen.
+func (e *ContextEngine) BuildCodeContext(prompt string, maxFiles int) (string, error) {
+	code, _, err := e.BuildCodeContextWithManifest(prompt, nil, maxFiles)
+	return code, err
 }
 
 // BuildStructure describes the project well enough for a planner to tell what

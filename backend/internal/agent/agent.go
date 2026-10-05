@@ -74,6 +74,10 @@ type SwarmContext struct {
 	// concurrent agents cannot overwrite each other's shared files.
 	FileLocks *workspace.FileLockManager
 
+	// LastContextManifest records the exact files, sizes and scores passed to the
+	// active agent in this round (PROJECT_VISION §17 & §37).
+	LastContextManifest *workspace.ContextManifest
+
 	// mu guards the mutable fields above. Agents inside a phase run
 	// concurrently and all write to the same context, so without this a
 	// custom team's shared state would be corrupted.
@@ -257,6 +261,26 @@ func (s *SwarmContext) SetLastTaskVerdict(v *TaskVerdict) {
 	s.LastTaskVerdict = v
 }
 
+// SetContextManifest records what context files the active agent was given.
+func (s *SwarmContext) SetContextManifest(m *workspace.ContextManifest) {
+	if s == nil || m == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.LastContextManifest = m
+}
+
+// ContextManifestSnapshot returns a copy of the latest context manifest.
+func (s *SwarmContext) ContextManifestSnapshot() *workspace.ContextManifest {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.LastContextManifest
+}
+
 // PlanProgress reports how much of the plan is done and how much is left. The
 // two return values are used together: zero open tasks on an empty plan means
 // "no plan yet", not "finished".
@@ -315,6 +339,24 @@ func (s *SwarmContext) NextTask() *domain.ProjectTask {
 	clone := *fallback
 	s.ActiveTask = &clone
 	return &clone
+}
+
+// PlanProgressPercent reports how much of the plan is closed, as a percentage.
+//
+// It exists so a caller can tell whether a round actually achieved anything
+// without holding two plan snapshots and comparing them. A batch where every task
+// was blocked leaves this number unchanged, and a loop that kept advancing on it
+// would spin over the same stuck state indefinitely.
+func (s *SwarmContext) PlanProgressPercent() int {
+	if s == nil {
+		return 0
+	}
+	plan := s.PlanSnapshot()
+	if plan == nil {
+		return 0
+	}
+	_, _, percent := plan.Progress()
+	return int(percent)
 }
 
 // CompleteTaskAs marks a specific task finished by id.
