@@ -3,6 +3,16 @@
 > **قانون: اگر فایلی اینجا رزرو شده، دست به آن نمی‌زنید.**
 > اگر فایلی که می‌خواهید تغییر دهید اینجاست، منتظر بمانید یا فایل دیگری بردارید.
 
+### ✅ Antigravity — ۲۰۲۶-۱۰-۰۵ ۱۰:۴۵ (تمام شد)
+- **هدف:** حل ریشه‌ای خطای `no model assigned to agent "coder"` در اجرای موازی تیم‌های دلخواه و توزیع چندمدلی واقعی بین کارگرها
+- `backend/internal/agent/agent.go` — فال‌بک هوشمند `getModelForRole` به مدل‌های موجود در `AgentModels` در صورت نبود مپ مستقیم نقش
+- `backend/internal/orchestrator/team.go` — مپ کردن مدل‌های پیاده‌ساز تیم به `AgentModels[domain.RoleCoder]` در شروع `RunTeam`
+- `backend/internal/orchestrator/parallel_tasks.go` & `parallel_tasks_test.go` — توزیع چرخشی مدل‌های تیم بین کارگرهای موازی در `runOneParallelTask` + تست جامع
+- **تمام ۱۲ پکیج Go بک‌اند ۱۰۰٪ سبز، بیلد فرانت‌اند تمیز، دیمون لایو روی پورت ۸۰۸۰.**
+- **تمام فایل‌ها آزاد هستند.**
+
+---
+
 ### ✅ Antigravity — ۲۰۲۶-۱۰-۰۵ ۱۰:۳۰ (تمام شد)
 - **هدف:** حل ریشه‌ای خطای اعتبارسنجی تسک‌ها (نرمال‌سازی اسلش‌ها در `missingFiles` و `taskCode`، خواندن خودکار فایل‌های تسک از دیسک در صورت عدم وجود در حافظه، افزودن رانر تست Flutter/Dart به `RunTests` و ثبت لاگ نتایج وریفایر در `e2e-test.ps1`)
 - `backend/internal/agent/verifier.go` & `verifier_test.go` — نرمال‌سازی مسیرها (`normalizePathKey`) و لود فایل‌های تسک از دیسک + ۲ تست جدید
