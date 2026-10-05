@@ -77,8 +77,9 @@ func selectParallelTasks(sCtx *agent.SwarmContext, limit int) []ParallelSlot {
 			continue
 		}
 		for _, f := range task.Files {
-			if f != "" {
-				claimed[f] = task.ID
+			norm := normalizeTaskPath(f)
+			if norm != "" {
+				claimed[norm] = task.ID
 			}
 		}
 		slots = append(slots, ParallelSlot{Task: task})
@@ -295,6 +296,140 @@ func normalizeTaskPath(p string) string {
 		return ""
 	}
 	return workspace.NormalizePath(p)
+}
+
+// runParallelBatch advances one batch of independent tasks and reports whether it
+// did any work.
+//
+// It returns false when there is no batch to run, which is the signal for the
+// caller to fall back to the single-task path. That distinction is what keeps the
+// serial path meaningful: it still runs whenever parallelism cannot help, rather
+// than a parallel path that quietly does nothing and leaves the run stalled.
+func (o *Orchestrator) runParallelBatch(
+	ctx context.Context,
+	sCtx *agent.SwarmContext,
+	projectID string,
+	ws *workspace.Workspace,
+) (bool, error) {
+	slots := selectParallelTasks(sCtx, o.parallelBudget())
+	if len(slots) == 0 {
+		// Nothing independent is available right now. That is not a failure: it
+		// may mean every open task shares a file, in which case the serial path
+		// will make progress on one of them.
+		return false, nil
+	}
+
+	// Claim the batch before starting, so two workers can never be handed the
+	// same task and the plan reflects reality from the moment work begins.
+	chosen := make([]*domain.ProjectTask, 0, len(slots))
+	for _, slot := range slots {
+		if slot.Task != nil {
+			chosen = append(chosen, slot.Task)
+		}
+	}
+	claimed := sCtx.ClaimTasksForBatch(chosen)
+	if len(claimed) == 0 {
+		return false, nil
+	}
+	// Pair the claimed tasks back to their slots, preserving order, so a worker
+	// reports against the task it actually claimed.
+	for i := range slots {
+		if slots[i].Task == nil {
+			continue
+		}
+		for _, task := range claimed {
+			if task.ID == slots[i].Task.ID {
+				slots[i].Task = task
+				break
+			}
+		}
+	}
+
+	o.broadcast(SwarmEvent{
+		Type:      EventRoundStarted,
+		ProjectID: projectID,
+		Round:     sCtx.Round,
+		Payload: fmt.Sprintf("%d تسک مستقل به‌صورت موازی اجرا می‌شود",
+			len(slots)),
+	})
+
+	outcomes := o.runParallelTasks(ctx, sCtx, projectID, ws, slots)
+
+	// Everything the workers produced is written to disk in one pass, by one
+	// goroutine. Writing from the workers themselves would let two agents flush
+	// the same file list at the same moment.
+	if len(sCtx.CodeFilesSnapshot()) > 0 {
+		if synced, err := ws.SyncFiles(sCtx.CodeFilesSnapshot()); err == nil {
+			sCtx.ReplaceCodeFiles(synced)
+		}
+	}
+
+	o.applyBatchOutcomes(sCtx, ws, outcomes, projectID, sCtx.Round)
+
+	// Review and judge the batch as a whole. Each task was already verified on its
+	// own evidence above, so this is judging the assembled result, not deciding
+	// whether individual tasks counted.
+	o.runCompilationGate(ctx, sCtx, ws)
+	o.runReview(ctx, sCtx, projectID)
+
+	o.broadcast(SwarmEvent{
+		Type:      EventAgentThinking,
+		ProjectID: projectID,
+		Round:     sCtx.Round,
+		Agent:     domain.RoleArbiter,
+		Payload:   "در حال ارزیابی کیفیت خروجی این دسته و ثبت رأی داور...",
+	})
+	if _, err := o.arbiter.Execute(ctx, sCtx); err != nil {
+		// The arbiter is the last step of a batch, so a failure here means the
+		// work is done but unjudged. That is worth reporting, not worth discarding:
+		// the next round will judge whatever comes after it.
+		log.Printf("arbiter failed after a parallel batch: %v", err)
+	}
+
+	verdict := sCtx.ArbiterVerdict
+	// A passing verdict may only stand when the project is actually finished.
+	// Judging the batch as a whole is exactly the judgement that once let a clean
+	// partial project report itself finished, so the plan gets the final say.
+	if verdict != nil {
+		plan := sCtx.PlanSnapshot()
+		if plan != nil && !plan.Completed() {
+			verdict.Passed = false
+			_, _, percent := plan.Progress()
+			verdict.Summary = fmt.Sprintf(
+				"امتیاز این دسته %.0f%% است، اما پروژه هنوز %.0f%% کامل است. ادامه می‌دهیم.",
+				verdict.FinalScore, percent)
+		}
+	}
+
+	if verdict != nil {
+		ws.CommitRound(ctx, sCtx.Round, verdict.FinalScore, verdict.Summary)
+	}
+
+	o.broadcast(SwarmEvent{
+		Type:      EventRoundComplete,
+		ProjectID: projectID,
+		Round:     sCtx.Round,
+		Verdict:   verdict,
+		Files:     sCtx.CodeFilesSnapshot(),
+		Usage:     sCtx.UsageSnapshot(),
+	})
+
+	// A batch where every task was skipped made no progress at all. Reporting
+	// that plainly lets the loop notice it is going in circles, instead of
+	// incrementing the round forever.
+	progressed := false
+	for _, outcome := range outcomes {
+		if outcome.Skipped == "" {
+			progressed = true
+			break
+		}
+	}
+	if !progressed {
+		log.Printf("parallel batch made no progress: every task was skipped")
+		return true, nil
+	}
+
+	return true, nil
 }
 
 // parallelBudget reports how many tasks may run at once.

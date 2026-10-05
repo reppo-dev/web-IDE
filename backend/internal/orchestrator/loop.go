@@ -38,18 +38,18 @@ func (o *Orchestrator) runArchitect(ctx context.Context, sCtx *agent.SwarmContex
 // runCompilationGate turns real build errors into review issues, so a broken
 // build can never be waved through by a high code-quality score.
 func (o *Orchestrator) runCompilationGate(ctx context.Context, sCtx *agent.SwarmContext, ws *workspace.Workspace) {
-	if len(sCtx.CodeFiles) == 0 || o.sandbox == nil {
+	files := sCtx.CodeFilesSnapshot()
+	if len(files) == 0 || o.sandbox == nil {
 		return
 	}
-	res := o.sandbox.VerifyCodebase(ctx, ws.Path(), sCtx.CodeFiles)
+	res := o.sandbox.VerifyCodebase(ctx, ws.Path(), files)
 	if res.Success || len(res.ErrorsFound) == 0 {
 		return
 	}
-	if sCtx.CriticReview == nil {
-		sCtx.CriticReview = &domain.CriticPayload{}
-	}
+	// Added one at a time through the locked method, so a gate that runs while a
+	// reviewer is still reporting cannot lose either side's findings.
 	for _, e := range res.ErrorsFound {
-		sCtx.CriticReview.Issues = append(sCtx.CriticReview.Issues, domain.ReviewIssue{
+		sCtx.AddReviewIssue(domain.ReviewIssue{
 			Severity:    "critical",
 			File:        "verification",
 			Description: fmt.Sprintf("Compiler/Syntax failure: %s", e),
@@ -62,16 +62,45 @@ func (o *Orchestrator) runCompilationGate(ctx context.Context, sCtx *agent.Swarm
 //
 // Both must succeed: a review that errors is not a clean review, and treating it
 // as one would let a task close on the strength of a failed check.
+// runReview has the critic and the security auditor read the same code at the
+// same time.
+//
+// They used to share one context, which was a data race: both assign their
+// findings straight onto the context — critic to CriticReview, security to
+// SecurityReport — with no lock, because a lone agent has no reason to lock
+// against itself. Two at once changes that. The symptom would not be a crash but
+// a review that silently mixes one agent's findings with another's, which is
+// worse to debug than a panic.
+//
+// So each reviewer works on its own fork and the results are merged afterwards.
 func (o *Orchestrator) runReview(ctx context.Context, sCtx *agent.SwarmContext, projectID string) (criticMsg, secMsg *domain.AgentMessage) {
-	review := func(role domain.AgentRole, payload string, a agent.Agent) (*domain.AgentMessage, error) {
+	// review runs one reviewer on a private fork and folds the result back.
+	review := func(role domain.AgentRole, payload string, a agent.Agent, activeTaskID string) (*domain.AgentMessage, error) {
 		o.broadcast(SwarmEvent{
 			Type: EventAgentThinking, ProjectID: projectID, Round: sCtx.Round,
 			Agent: role, Payload: payload,
 		})
-		msg, err := a.Execute(ctx, sCtx)
+
+		fork := sCtx.Fork(role, activeTaskID)
+		if fork == nil {
+			fork = sCtx
+		}
+
+		msg, err := a.Execute(ctx, fork)
 		if err != nil {
 			return nil, err
 		}
+
+		// Merged from this goroutine only after the agent has finished, so the
+		// shared context is written exactly once per reviewer.
+		sCtx.MergeResult(agent.ForkResult{
+			Role:           role,
+			Message:        msg,
+			CriticReview:   fork.CriticReview,
+			SecurityReport: fork.SecurityReport,
+			Usage:          fork.TakeUsage(),
+		})
+
 		o.broadcast(SwarmEvent{
 			Type: EventAgentOutput, ProjectID: projectID, Round: sCtx.Round,
 			Agent: role, Message: msg,
@@ -80,25 +109,32 @@ func (o *Orchestrator) runReview(ctx context.Context, sCtx *agent.SwarmContext, 
 		return msg, nil
 	}
 
+	// The task under review, so each fork reports against the same task the
+	// orchestrator meant rather than whatever was last active.
+	activeTaskID := ""
+	if sCtx.ActiveTask != nil {
+		activeTaskID = sCtx.ActiveTask.ID
+	}
+
 	var criticErr, secErr error
 
 	if sCtx.ReviewSequentially {
 		criticMsg, criticErr = review(domain.RoleCritic,
-			"در حال بازبینی موشکافانه، کشف باگ‌ها و لبه‌های تست...", o.critic)
+			"در حال بازبینی موشکافانه، کشف باگ‌ها و لبه‌های تست...", o.critic, activeTaskID)
 		secMsg, secErr = review(domain.RoleSecurity,
-			"در حال ممیزی امنیتی کد و جلوگیری از آسیب‌پذیری‌ها...", o.security)
+			"در حال ممیزی امنیتی کد و جلوگیری از آسیب‌پذیری‌ها...", o.security, activeTaskID)
 	} else {
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
 			criticMsg, criticErr = review(domain.RoleCritic,
-				"در حال بازبینی موشکافانه، کشف باگ‌ها و لبه‌های تست...", o.critic)
+				"در حال بازبینی موشکافانه، کشف باگ‌ها و لبه‌های تست...", o.critic, activeTaskID)
 		}()
 		go func() {
 			defer wg.Done()
 			secMsg, secErr = review(domain.RoleSecurity,
-				"در حال ممیزی امنیتی کد و جلوگیری از آسیب‌پذیری‌ها...", o.security)
+				"در حال ممیزی امنیتی کد و جلوگیری از آسیب‌پذیری‌ها...", o.security, activeTaskID)
 		}()
 		wg.Wait()
 	}
@@ -114,11 +150,15 @@ func (o *Orchestrator) runReview(ctx context.Context, sCtx *agent.SwarmContext, 
 	return criticMsg, secMsg
 }
 
+// recordReviewFailure notes that a reviewer could not do its job.
+//
+// It goes through a locked context method because the critic and the security
+// auditor both report here, and under concurrent review those two calls can
+// arrive at once. Appending to a slice without a lock would lose one of the two
+// failures — and a silently dropped failure is exactly what this exists to
+// prevent.
 func recordReviewFailure(sCtx *agent.SwarmContext, what string, err error) {
-	if sCtx.CriticReview == nil {
-		sCtx.CriticReview = &domain.CriticPayload{}
-	}
-	sCtx.CriticReview.Issues = append(sCtx.CriticReview.Issues, domain.ReviewIssue{
+	sCtx.AddReviewIssue(domain.ReviewIssue{
 		Severity:    "major",
 		File:        "verification",
 		Description: fmt.Sprintf("%s: %v", what, err),
@@ -192,6 +232,23 @@ func (o *Orchestrator) runPlanDrivenLoop(ctx context.Context, sCtx *agent.SwarmC
 				Round:     sCtx.Round,
 				Plan:      sCtx.PlanSnapshot(),
 			})
+		}
+
+		// Parallel path: advance several independent tasks at once.
+		//
+		// This runs before the serial path and returns as soon as it has done a
+		// batch, so the serial path remains the single-task case rather than a
+		// second, subtly different implementation of the same round.
+		//
+		// It returns false when parallelism is off or no independent batch exists,
+		// and the loop then falls through to advancing exactly one task as before.
+		if o.parallelEnabled() {
+			if handled, err := o.runParallelBatch(ctx, sCtx, projectID, ws); err != nil {
+				return nil, err
+			} else if handled {
+				sCtx.Round++
+				continue
+			}
 		}
 
 		task := sCtx.NextTask()

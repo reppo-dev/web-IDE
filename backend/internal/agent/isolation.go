@@ -110,9 +110,14 @@ func (s *SwarmContext) FindTask(id string) *domain.ProjectTask {
 
 // MergeResult folds one parallel agent's output back into the shared context.
 //
-// It runs on a single goroutine after the parallel phase finishes, which is what
-// keeps the merge itself free of races. Only fields an agent genuinely produced
-// are taken: merging a nil would erase whatever another agent already reported.
+// Workers call this themselves as they finish, so it is called from several
+// goroutines at once and relies on the context mutex to stay consistent. Only
+// fields an agent genuinely produced are taken: merging a nil would erase
+// whatever another agent already reported.
+//
+// Merge order is not deterministic — whichever worker finishes first writes
+// first. That is why the file set is what settles conflicts rather than who got
+// there first: see the collision report below.
 type ForkResult struct {
 	Role    domain.AgentRole
 	TaskID  string

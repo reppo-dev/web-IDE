@@ -635,11 +635,11 @@ func (o *Orchestrator) runTeamPhases(ctx context.Context, sCtx *agent.SwarmConte
 		if ws != nil && o.sandbox != nil {
 			execRes := o.sandbox.VerifyCodebase(ctx, ws.Path(), files)
 			if !execRes.Success && len(execRes.ErrorsFound) > 0 {
-				if sCtx.CriticReview == nil {
-					sCtx.CriticReview = &domain.CriticPayload{}
-				}
+				// Recorded through the locked method: a team's members may finish
+				// reporting at the same moment this gate runs, and an unguarded
+				// append would drop one of the two sets of findings.
 				for _, compErr := range execRes.ErrorsFound {
-					sCtx.CriticReview.Issues = append(sCtx.CriticReview.Issues, domain.ReviewIssue{
+					sCtx.AddReviewIssue(domain.ReviewIssue{
 						Severity:    "critical",
 						File:        "verification",
 						Description: fmt.Sprintf("Verification failure (%s): %s", execRes.Language, compErr),

@@ -709,6 +709,35 @@ func (s *SwarmContext) SetCodeFiles(files []domain.CodeFile) {
 	s.ReplaceCodeFiles(files)
 }
 
+// AddReviewIssue appends a finding under the context lock.
+//
+// Reviewers run concurrently and each reports findings as they finish, so an
+// unguarded append would drop one of them. A finding that vanishes is worse than
+// no finding: the task closes on a review that never actually saw the problem.
+func (s *SwarmContext) AddReviewIssue(issue domain.ReviewIssue) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.CriticReview == nil {
+		s.CriticReview = &domain.CriticPayload{}
+	}
+	s.CriticReview.Issues = append(s.CriticReview.Issues, issue)
+}
+
+// SetSecurityReport stores the security audit result under the lock, for the same
+// reason AddReviewIssue locks: concurrent writers must not lose a result.
+func (s *SwarmContext) SetSecurityReport(report *domain.SecurityPayload) {
+	if s == nil || report == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.SecurityReport = report
+}
+
 // ClearVerificationIssues drops the compiler errors from the last verification
 // run so the next one reports only what is still broken.
 func (s *SwarmContext) ClearVerificationIssues() {
