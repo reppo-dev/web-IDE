@@ -52,6 +52,7 @@ export function TaskStreamCard({ taskId, title, steps, running }: TaskStreamCard
   const [expanded, setExpanded] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedToBottom = useRef(true);
+  const latest = steps.length > 0 ? steps[steps.length - 1] : null;
 
   // Follow the newest step, but stop following the moment the user scrolls up.
   // Auto-scrolling unconditionally would yank them away from something they had
@@ -61,7 +62,7 @@ export function TaskStreamCard({ taskId, title, steps, running }: TaskStreamCard
     if (el && pinnedToBottom.current) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [steps.length]);
+  }, [steps.length, latest?.text]);
 
   const handleScroll = () => {
     const el = scrollRef.current;
@@ -77,8 +78,6 @@ export function TaskStreamCard({ taskId, title, steps, running }: TaskStreamCard
       pinnedToBottom.current = true;
     }
   };
-
-  const latest = steps.length > 0 ? steps[steps.length - 1] : null;
 
   return (
     <div className="task-stream-card" data-task-id={taskId}>

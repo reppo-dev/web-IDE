@@ -28,6 +28,9 @@ func (o *Orchestrator) runRoleBased(ctx context.Context, projectID string, userP
 		AgentModels: agentModels,
 		APIKeys:     apiKeys,
 	}
+	sCtx.TokenStreamer = func(role domain.AgentRole, as string, taskID string, chunk string) {
+		o.streamToken(projectID, sCtx.Round, taskID, role, as, chunk)
+	}
 
 	// 1. Initialize Disk Workspace with Git tracking
 	ws, err := workspace.NewWorkspace(o.baseDir, projectID)

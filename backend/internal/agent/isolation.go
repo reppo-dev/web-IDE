@@ -43,7 +43,8 @@ func (s *SwarmContext) Fork(role domain.AgentRole, taskID string) *SwarmContext 
 		// The lock coordinator is deliberately shared, not copied. Forking it
 		// would give each agent its own private set of locks, and mutual
 		// exclusion would be exactly zero.
-		FileLocks: s.FileLocks,
+		FileLocks:     s.FileLocks,
+		TokenStreamer: s.TokenStreamer,
 	}
 
 	// The maps are rebuilt rather than aliased. Two agents appending to one

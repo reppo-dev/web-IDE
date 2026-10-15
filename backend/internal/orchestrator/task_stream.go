@@ -188,3 +188,20 @@ func (o *Orchestrator) stepEditAs(projectID string, round int, taskID, as, summa
 func (o *Orchestrator) stepTestAs(projectID string, round int, taskID, as, summary string) {
 	o.taskStepAs(projectID, round, taskID, domain.RoleTester, as, StepTest, summary, nil)
 }
+
+// streamToken broadcasts an incremental token chunk for the live active task and agent.
+func (o *Orchestrator) streamToken(projectID string, round int, taskID string, role domain.AgentRole, as string, chunk string) {
+	if chunk == "" {
+		return
+	}
+	o.broadcast(SwarmEvent{
+		Type:        EventTokenChunk,
+		ProjectID:   projectID,
+		Round:       round,
+		TaskID:      taskID,
+		Agent:       role,
+		StreamAgent: as,
+		Chunk:       chunk,
+	})
+}
+

@@ -1,261 +1,214 @@
-# 🌌 NexusAI — Multi-Agent Adversarial Collaborative IDE
+# 🌌 NexusAI — Autonomous Multi-Agent Software Engineering IDE & Daemon
 
-> **"A relentless, self-critiquing AI engineering team that misses nothing and delivers production-grade software instead of superficial placeholders."**
+[![Go Version](https://img.shields.io/badge/Go-1.22%2B-00ADD8?style=flat&logo=go)](https://golang.org)
+[![React](https://img.shields.io/badge/React-18-61DAFB?style=flat&logo=react)](https://reactjs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-3178C6?style=flat&logo=typescript)](https://www.typescriptlang.org)
+[![Monaco Editor](https://img.shields.io/badge/Monaco_Editor-VS_Code_Core-blue)](https://microsoft.github.io/monaco-editor/)
+[![Tests](https://img.shields.io/badge/Tests-100%25_Passing-brightgreen)](https://github.com)
+[![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
-NexusAI is an autonomous software development environment powered by a coordinated ensemble of **5 specialized AI agents** operating in an **adversarial round-robin synthesis cycle**. Built with a high-concurrency **Go backend** (`nexusd`) and a dark, minimalist **Cursor-style desktop IDE** (React + Monaco Editor + TypeScript).
-
----
-
-## 💡 The Core Vision & Philosophy (چشم‌انداز و فلسفه پروژه)
-
-### 🚨 The Problem with Single-Agent AI Tools
-Today's AI coding assistants (ChatGPT, Copilot, vanilla Cursor) behave like an **unsupervised junior developer**:
-1. **Laziness & Shortcuts:** They generate snippets with `// TODO: implement later`, mock functions, and half-finished logic.
-2. **Blind Spots:** An AI model cannot see its own hallucinations or flawed assumptions.
-3. **Ignored Edge Cases:** Concurrency race conditions, memory leaks, missing error checks, and security vulnerabilities are consistently missed.
-4. **Manual User Burden:** The human developer is forced to spend hours reviewing, debugging, and re-prompting the AI.
-
-### 🛡️ The NexusAI Solution
-NexusAI replaces the single AI with a **full autonomous software engineering department**:
-- Rather than trusting one model, generative and critical models are pitted against each other.
-- **Every agent cross-examines the outputs of the other agents.**
-- Code is **actually compiled and verified in a real sandbox** (no hallucinated syntax validation).
-- An **Arbiter Judge** enforces a strict **85% consensus quality threshold** across 5 weighted dimensions before code is ever merged into the workspace.
-- A **Mem0-style persistent SQLite memory** retains architectural decisions, past bugs, and user preferences across projects.
+> **"A deterministic, self-critiquing multi-agent engineering engine that compiles, tests, and verifies code on disk — rejecting AI hallucinations through compiler feedback and strict gatekeepers."**
 
 ---
 
-## 👥 The 5-Agent Swarm
+## 📖 Executive Summary (معرفی کلی)
+
+**NexusAI** is an experimental next-generation IDE and autonomous software development engine. Unlike conventional "wrapper" tools that merely stream ChatGPT responses into an editor, NexusAI orchestrates a **swarm of specialized AI agents** (Architect, Lead Coder, Adversarial Critic, Security Auditor, Arbiter) working over a shared local workspace.
+
+It replaces the superficial "chat-bubble" paradigm with a **Plan-Driven State Machine**, **Atomic File-Lease Locks**, **Multi-Worker Parallelism**, and a **Ground Truth Verification Engine** that runs native compilers, linters, and unit test suites on your machine before code is ever accepted.
+
+> 🤝 **Meta-Engineering Experiment:** This entire codebase was co-engineered simultaneously by **two independent autonomous AI agents** (Claude & Antigravity) running on the same local directory, coordinating in real-time through atomic file locks and communication boards (`coordination/`).
+
+---
+
+## 🏛️ System Architecture
 
 ```
-                         [User Prompt: Persian or English]
-                                        │
+                                  [ User Request / Feature Goal ]
+                                                 │
+                                                 ▼
+                             ┌───────────────────────────────────────┐
+                             │    Intent Classifier & Context Engine │
+                             │   (Triage: Chat vs Question vs Build) │
+                             └───────────────────┬───────────────────┘
+                                                 │
+                                                 ▼
+                             ┌───────────────────────────────────────┐
+                             │       Plan-Driven Task Engine         │
+                             │  (Auto-Generates 10-35 Native Tasks)  │
+                             │   .project/plan.json & tasks.md       │
+                             └───────────────────┬───────────────────┘
+                                                 │
+                                                 ▼
+                      ┌─────────────────────────────────────────────────────┐
+                      │    True Task Parallelism & File Lease Coordinator   │
+                      │   (Dispatches isolated context forks to N workers)  │
+                      └──────────────┬───────────────────┬──────────────────┘
+                                     │                   │
+                  ┌──────────────────┴──┐             ┌──┴──────────────────┐
+                  ▼                     ▼             ▼                     ▼
+          ┌───────────────┐     ┌───────────────┐ ┌───────────────┐ ┌───────────────┐
+          │ Coder Worker 1│     │ Coder Worker 2│ │ Critic Review │ │ Security Guard│
+          │ (e.g. Qwen)   │     │ (e.g. Claude) │ │ (Adversarial) │ │ (OWASP/CWE)   │
+          └───────┬───────┘     └───────┬───────┘ └───────┬───────┘ └───────┬───────┘
+                  │                     │                 │                 │
+                  └─────────────────────┼─────────────────┴─────────────────┘
                                         ▼
-                  ┌───────────────────────────────────────────┐
-                  │        1. System Architect 🏗️             │
-                  │  Decomposes requirements into blueprints, │
-                  │  file trees & API contracts (zero missed) │
-                  └─────────────────────┬─────────────────────┘
-                                        ▼
-                  ┌───────────────────────────────────────────┐
-                  │        2. Lead Coder (Engineer) 💻        │
-                  │  Writes complete, robust code for each   │
-                  │  file with zero placeholders or TODOs     │
-                  └─────────────────────┬─────────────────────┘
-                                        ▼
-             ┌──────────────────────────┴──────────────────────────┐
-             ▼                                                     ▼
-┌─────────────────────────┐                               ┌─────────────────────────┐
-│ 3. Adversarial Critic 🔴│                               │  4. Security Guard 🛡️   │
-│  The Red Team: hunts    │◄─────────────────────────────►│  Audits against OWASP,  │
-│  race conditions, logic │   (Concurrent Cross-Review)   │  injection, secret leaks│
-│  flaws & edge cases     │                               │  and sanitization gaps  │
-└────────────┬────────────┘                               └────────────┬────────────┘
-             └──────────────────────────┬──────────────────────────────┘
-                                        ▼
-                  ┌───────────────────────────────────────────┐
-                  │ 5. Arbiter & Consensus Judge ⚖️           │
-                  │  Calculates 5-dimension score (0-100%).   │
-                  │  Score >= 85% ?                           │
-                  └──────┬─────────────────────────────┬──────┘
-                         │ NO (< 85%)                  │ YES (>= 85%)
-                         ▼                             ▼
-              [Refinement Round]           [Consensus Approved]
-            Feedback returned to Coder      Synced to Disk & Git Auto-Commit
+                             ┌───────────────────────────────────────┐
+                             │   Ground Truth Verification Engine    │
+                             │   (Real 'go test', 'flutter test',    │
+                             │    'dart analyze', syntax sandboxes)  │
+                             └───────────────────┬───────────────────┘
+                                                 │
+                                                 ▼
+                             ┌───────────────────────────────────────┐
+                             │           Task State Gate             │
+                             │   Pass: DONE -> Git Checkpoint Ref    │
+                             │   Fail: REWORK (Max 3) -> Human Alert │
+                             └───────────────────┬───────────────────┘
+                                                 │
+                                                 ▼
+                             ┌───────────────────────────────────────┐
+                             │   Change Ledger (.project/ledger)     │
+                             │   + UI Live Stream (Token Chunk WS)   │
+                             └───────────────────────────────────────┘
 ```
 
-| Agent | Persona & Purpose | Key Responsibilities |
+---
+
+## ⚡ Core Engineering Features (قابلیت‌های کلیدی مهندسی)
+
+### 1. Ground Truth Verification Engine (سندباکس اعتبارسنجی واقعی)
+Language models hallucinate syntax and import paths. NexusAI completely eliminates ungrounded code by executing real compiler tooling (`go test`, `flutter test`, `dart analyze`, `python compileall`, `tsc`) in isolated sub-processes with 30-second execution timeouts. If a test fails, the raw compiler stack trace is injected directly into the next rework cycle.
+
+### 2. Plan-Driven State Machine & Task Decomposition
+Instead of writing an entire application in one giant prompt, the Architect decomposes features into a structured backlog stored on disk (`.project/plan.json` and human-readable `.project/tasks.md`):
+$$\text{Task States: } \text{TODO} \longrightarrow \text{IN\_PROGRESS} \longrightarrow \text{DONE} \mid \text{REWORK (Max 3)} \mid \text{WAITING\_FOR\_HUMAN}$$
+
+### 3. True Task Parallelism & File Lease Locks (موازی‌سازی واقعی تسک‌ها)
+Multiple coder agents can work concurrently on independent tasks. A central **File Lease Coordinator** prevents race conditions:
+- Agents obtain timed leases on specific files (`auth.dart`, `models.dart`).
+- Shared files cannot be modified simultaneously.
+- When an agent completes or fails, locks are atomically released.
+
+### 4. Git Checkpoint Isolation (`refs/nexusai/checkpoints`)
+NexusAI never clobbers or pollutes the user's `main` branch with intermediate experimental commits. Every round creates a tree object committed to a hidden reference (`refs/nexusai/checkpoints`). Only when the user clicks **"Accept Changes"** (or calls `POST /api/projects/:id/accept`) are verified changes cleanly merged into the active working tree.
+
+### 5. Multi-Model Heterogeneous Swarms (تیم‌های چندمدلی واقعی)
+NexusAI avoids vendor lock-in. Workers can be distributed across different model providers simultaneously:
+- **Planner:** Claude 3.7 Sonnet / DeepSeek R1
+- **Parallel Workers:** Qwen 2.5 Coder, Nemotron, Llama 3.3, OpenAI GPT-4o
+- **Local Fallback:** Local Ollama / vLLM / NineRouter models
+
+### 6. Real-Time Token Streaming over WebSocket (`token_chunk`)
+Supports SSE streaming directly through an internal concurrency-limiting guard (`llm.Guard`). As tokens are generated by the upstream LLM, they stream live over WebSockets directly into the active Task Card in the Cursor-style UI.
+
+---
+
+## 🔍 The Hard Truth: Shortcomings & What's Missing (کم و کسری‌ها و چالش‌های حل‌نشده)
+
+An honest post-mortem is worth more than a dozen marketing claims. While NexusAI solved difficult concurrency and verification problems, building an autonomous AI IDE revealed significant engineering boundaries and limitations:
+
+### ⚠️ 1. Token Economics & Cost Explosion (هزینه‌ی بالای مصرف توکن)
+- **The Issue:** A multi-agent consensus run with 5 agents, cross-reviews, and 3 rounds of verification on a 30-task project can easily make 150+ LLM API calls and consume **300,000 to 1,500,000+ tokens**.
+- **Real-world Impact:** Running this on expensive proprietary models (like GPT-4o or Claude 3.7) costs several dollars per feature. Without aggressive token budgeting and cheap local models (Qwen/DeepSeek), it is economically unviable for continuous hobbyist use.
+
+### ⚠️ 2. Semantic vs Syntactic Conflict Resolution (تداخل‌های معنایی)
+- **The Issue:** While file-lease locking prevents two agents from editing the same file at the same time (syntactic collision), it **cannot prevent semantic regressions across files**.
+- **Example:** Coder 1 modifies a function signature in `user_service.dart`, while concurrent Coder 2 calls the old signature in `profile_screen.dart`. Both write syntactically valid code in their own files, but the project breaks when compiled together.
+- **Current State:** Caught by the Verification Gate after merge, triggering a Rework cycle; but this burns extra rounds.
+
+### ⚠️ 3. Host Process Execution vs Full Containerization (امنیت سندباکس محلی)
+- **The Issue:** The test runner executes commands directly on the host operating system (`exec.Command` on Windows/Linux).
+- **Security Limitation:** Unlike production sandbox environments (Docker, Firecracker MicroVMs, gVisor), there is no kernel-level filesystem or network isolation. If an untrusted package or hallucinated malicious shell command is introduced, it executes with the user's permissions.
+
+### ⚠️ 4. Standalone IDE Shell vs VS Code Extension Reality (سندروم ساخت مجدد چرخ)
+- **The Problem:** Building an entire desktop IDE from scratch (Monaco editor tabs, file tree, terminal emulator, git status widget) requires hundreds of hours of frontend maintenance.
+- **The Market Reality:** Developers do not want to abandon their custom VS Code / Cursor extensions, themes, and keybindings for a new standalone web-based IDE. The core moat of NexusAI is the **daemon and orchestration engine (`nexusd`)**, which would be far more effective packaged as a **VS Code Extension** or **CLI Agent (similar to Claude Code or Aider)**.
+
+### ⚠️ 5. The "Chatbot Swarm" Illusion in Commodity Tools (توهم تیم‌های چت‌باتی)
+- Tools like Grok, Hermes, and generic multi-agent wrappers let users create "teams" of agents. However, these are almost entirely **chat-based simulations**: they talk to each other in plain text without local compiler feedback, disk-level file locking, or git integrity.
+- **NexusAI's Lesson:** Building real software autonomously cannot be achieved through chatting alone. It requires deterministic systems engineering, hard timeouts, state machines, and human escalation gates.
+
+---
+
+## 🛠️ Technology Stack
+
+| Layer | Technology | Rationale |
 | :--- | :--- | :--- |
-| **Architect** | The Strategist & Decomposer | Analyzes requests (in Persian or English). Extracts all edge cases and designs clean file trees and API contracts. |
-| **Lead Coder** | The Senior Implementer | Writes clean, complete production source code. Explains rationale and fixes bugs flagged in subsequent rounds. |
-| **Adversarial Critic** | The Red Team Code Reviewer | Relentlessly scrutinizes code for logic errors, deadlocks, unhandled exceptions, and performance bottlenecks. Demands concrete code corrections. |
-| **Security Auditor** | The Shield & Threat Modeler | Scans for OWASP Top 10, CWE vulnerabilities, SQL/command injection, authentication bypass, and sensitive data leaks. |
-| **The Arbiter** | Consensus Judge & Scorekeeper | Tracks penalties, computes 5-dimension weighted scores, breaks stalemates, and issues the final consensus verdict. |
+| **Backend Core** | Go 1.22+ (`nexusd`) | Low memory footprint, sub-millisecond goroutines, typed concurrency (`sync.RWMutex`), zero-CGO SQLite. |
+| **State & Memory** | SQLite (`modernc.org/sqlite`) | Embedded, pure Go, zero external database setup. Stores Project Brain, Facts, Assumptions, and Decisions. |
+| **Frontend Shell** | React 18, TypeScript, Vite | Sub-3-second production builds, strict typing, responsive state management. |
+| **Code Editor** | Monaco Editor (`@monaco-editor/react`) | Industry-standard VS Code engine with diff viewers and syntax highlighting. |
+| **Communication** | WebSocket (`ws://:8080/ws`) | Full-duplex JSON event streaming for live task cards, token chunks, and file locks. |
+| **Verification** | Native CLI Subprocesses | Real execution of `flutter`, `dart`, `go`, `node`, `python` test suites. |
 
 ---
 
-## ⚡ Concurrency & Architecture (Go Backend)
+## 🚦 Verification & Test Suite
 
-The backend (`backend/`) is written in **Go 1.22+** to take advantage of native goroutines, typed channels, and sub-millisecond coordination:
+The backend contains exhaustive unit, integration, and race-detector tests across all 12 Go packages:
 
-### 1. Three Swarm Execution Modes
-- **Role-Based (Phased - Recommended):** Architect plans -> Coder drafts -> Critic & Security inspect in parallel -> Arbiter judges.
-- **Concurrent (Channel-Driven):** All agents run concurrently as goroutines, exchanging messages via typed channels (`chan domain.AgentMessage`).
-- **Sequential (Linear):** Classical turn-based round-robin loop.
+```powershell
+# Run full test suite across all 12 backend packages:
+cd backend
+go test -count=1 ./internal/... ./api/...
 
-### 2. All-to-All Peer Cross-Examination Matrix
-In every round, every agent reviews the other 4 agents' work (**$5 \times 4 = 20$ pairwise evaluations**), producing an agreement/disagreement matrix and convergence metrics.
+# Verify zero race conditions:
+go test -race ./internal/agent/... ./internal/orchestrator/...
 
-### 3. Real Compiler Sandbox & Ground Truth
-`internal/sandbox/runner.go` runs real syntax and compiler checks (`go vet`, `python -m compileall`, etc.) on disk. If the compiler fails, real terminal stack traces are fed directly to the Critic as critical bugs.
-
-### 4. Virtual Workspace & Git Auto-Versioning
-`internal/workspace/workspace.go` manages physical project files on disk, computes line-by-line unified diffs, and automatically creates a **Git Commit** for each swarm round:
-```
-[NexusAI Swarm] Round 1 | Score: 91.5% | Summary of consensus
+# Static analysis:
+go vet ./...
 ```
 
-### 5. Mem0-Style Persistent Memory (Pure SQLite)
-`internal/memory/sqlite.go` uses embedded pure Go SQLite (`modernc.org/sqlite` — zero CGO dependencies):
-- **Project Memory (`data/projects/{id}/memories.db`):** Architecture decisions, bugs caught, patterns, and insights scoped to the active project.
-- **Global Memory (`data/global.db`):** User coding preferences, favorite conventions, and cross-project knowledge.
-
-### 6. Model Context Protocol (MCP) Integration
-`internal/mcp/protocol.go` implements standard **JSON-RPC 2.0 over Stdio**, allowing the swarm to execute tools from external MCP servers (e.g. GitHub, PostgreSQL, Docker, Snyk).
+**Result:** 100% Pass Rate across all packages:
+- `internal/agent`: Context engine, isolation forks, token streaming, memory grounding.
+- `internal/orchestrator`: Plan loop, parallel batching, stall detection, lease coordination.
+- `internal/llm`: Guard retries, backoff, session budgets, SSE streaming chunks.
+- `internal/workspace`: Disk syncing, git checkpointing, path validation, change ledger.
 
 ---
 
-## 🖥️ Cursor-Style Desktop IDE Frontend (`frontend/`)
-
-The frontend is modeled directly after **Cursor IDE** with a clean, dark `#141414` palette:
-
-1. **Title Bar:** Window controls, quick project switcher, and central Command Palette search (`Ctrl + P`).
-2. **Activity Bar (48px left):**
-   - 📁 **Explorer:** File tree with clean "No folder opened" empty state.
-   - 🔍 **Search:** Full-text project search.
-   - 🌿 **Source Control:** Swarm round-by-round commit history.
-   - 📦 **Skills & MCP:** Installed developer skills and connected MCP servers.
-   - 🧠 **Memory (Mem0):** Search and filter persistent memories by tags and types.
-   - ⚖️ **Arbiter Audit:** Quality score breakdown and consensus status.
-   - ⚙️ **Settings:** Opens the Cursor-style API configuration modal.
-3. **Editor Area:**
-   - **Welcome Screen:** When no files are open (clean branding, quick starters, shortcuts).
-   - **Editor Tabs:** Tab navigation with dirty indicators and **Diff Mode Toggle**.
-   - **Monaco Code Editor:** VS Code dark theme, syntax highlighting, and inline agent review popovers.
-   - **Collapsible Terminal Panel:** Interactive command execution and live build output.
-4. **Cursor Composer (Right Panel):**
-   - Model Selector: GPT-4o, Claude 3.7 Sonnet, Gemini 2.5 Flash, DeepSeek R1, Ollama Local.
-   - Swarm Mode Selector (`Role-Based`, `Concurrent`, `Sequential`).
-   - Live stream of agent thoughts, critique cards, consensus progress pill, and **Accept Changes** button.
-5. **Settings Modal ⚙️:**
-   - Enter API Keys for **OpenRouter**, **OpenAI**, **Google Gemini**, **Anthropic**, or custom endpoints.
-   - Configure local **Ollama** URL (`http://localhost:11434/v1`).
-   - Customize Consensus Threshold (default 85%) and Max Rounds.
-   - Assign different AI models to individual agent personas.
-
----
-
-## 📁 Repository Structure
-
-```
-nexus-ai/
-├── backend/                        # Go Concurrent Daemon & Swarm Core
-│   ├── cmd/nexusd/main.go          # Daemon entrypoint (starts :8080 & WS)
-│   ├── api/                        # WebSocket hub and HTTP router
-│   │   ├── router.go               # HTTP routes (/health, /api/skills, /api/memories)
-│   │   └── ws_server.go            # Real-time WebSocket event streaming
-│   ├── internal/
-│   │   ├── agent/                  # The 5 Swarm Personas & Cross-Examination
-│   │   │   ├── agent.go            # Base agent interface and SwarmContext
-│   │   │   ├── architect.go        # Architect persona (blueprints, Persian/English)
-│   │   │   ├── coder.go            # Lead Coder persona (multi-file generator)
-│   │   │   ├── critic.go           # Adversarial Critic persona (bug hunter)
-│   │   │   ├── security.go         # Security Auditor persona (OWASP/CWE scanner)
-│   │   │   ├── arbiter.go          # Arbiter persona (judge and scorer)
-│   │   │   └── matrix.go           # N-to-N cross-examination debate matrix (20 pairs)
-│   │   ├── domain/types.go         # Core data types, messages, verdicts
-│   │   ├── llm/                    # Provider-agnostic client (OpenAI, OpenRouter, Gemini)
-│   │   │   ├── client.go           # Client interface and request models
-│   │   │   └── openai_compat.go    # HTTP client with JSON Schema formatting
-│   │   ├── mcp/                    # Model Context Protocol host & JSON-RPC 2.0 stdio
-│   │   │   ├── host.go             # Registry of servers and tools
-│   │   │   └── protocol.go         # Stdio transport and JSON-RPC 2.0 client
-│   │   ├── memory/                 # Mem0-style SQLite persistent memory
-│   │   │   ├── store.go            # MemoryStore interface
-│   │   │   └── sqlite.go           # Pure Go SQLite driver (projects & global DB)
-│   │   ├── orchestrator/           # Swarm execution engines (3 modes)
-│   │   │   ├── orchestrator.go     # Event hub and coordinator
-│   │   │   ├── rolebased.go        # Phased execution with sandbox and git commit
-│   │   │   ├── concurrent.go       # Goroutine & channel fan-out
-│   │   │   └── sequential.go       # Linear loop
-│   │   ├── sandbox/runner.go       # Real compiler & syntax execution
-│   │   ├── scoring/                # 5-dimension scoring and stalemate breaker
-│   │   │   ├── scorer.go           # Weighted dimension calculation
-│   │   │   └── convergence.go      # Stalemate detector & tie-breaker
-│   │   ├── skills/manager.go       # Skills loading and trigger matching
-│   │   └── workspace/workspace.go  # Disk filesystem sync, unified diffs & git
-│   └── go.mod
-│
-├── frontend/                       # Cursor-Style Desktop IDE (React + Monaco + Vite)
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── layout/             # TitleBar, ActivityBar, Sidebar, StatusBar
-│   │   │   ├── editor/             # EditorTabs, WelcomeScreen
-│   │   │   ├── ide/                # CodeEditor (Monaco), TerminalView
-│   │   │   ├── composer/           # ComposerPanel (Cursor AI Chat side-panel)
-│   │   │   └── modals/             # SettingsModal, NewProjectModal
-│   │   ├── services/websocket.ts   # Auto-reconnecting WebSocket client
-│   │   ├── types.ts                # TypeScript interfaces matching backend
-│   │   ├── App.tsx                 # Root workbench application
-│   │   └── main.tsx                # Entrypoint
-│   └── package.json
-│
-├── docs/superpowers/
-│   ├── specs/2026-09-29-nexusai-design.md        # Full architectural specification
-│   └── plans/2026-09-29-nexusai-implementation.md  # 18-task implementation plan
-│
-├── Makefile                        # Build automation (build, test, run)
-├── AI_GUIDE.md                     # Dedicated instructions for future AI collaborators
-└── README.md                       # This master documentation
-```
-
----
-
-## 🚀 Quick Start Guide
+## 📦 How to Run Locally
 
 ### 1. Prerequisites
-- **Go 1.22+** (`go version`)
-- **Node.js 18+** & **npm** (`node -v`, `npm -v`)
-- **Git** (`git --version`)
+- **Go 1.22+**
+- **Node.js 18+ & npm**
+- **Git**
 
-### 2. Configure Your API Key
-NexusAI works out-of-the-box with **OpenRouter** (which includes free models like `deepseek-r1:free`, `llama-3.3-70b:free`) or **Google Gemini** (via Google AI Studio free tier):
-
-**Option A: Via Environment Variables**
-```powershell
-# OpenRouter (Recommended: access all models with one key)
-$env:OPENROUTER_API_KEY = "sk-or-v1-..."
-
-# Or Google Gemini / OpenAI
-$env:OPENAI_API_KEY = "AIzaSy..."
-$env:OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+### 2. Configure Environment
+Create a `.env` file in the project root:
+```env
+OPENROUTER_API_KEY=sk-or-v1-...
+# Or custom / local endpoint:
+OPENAI_BASE_URL=http://localhost:11434/v1
+OPENAI_API_KEY=ollama
 ```
 
-**Option B: Via the IDE Settings Modal (⚙️)**
-You can also launch the IDE and paste your key directly into the **Settings** dialog. It will be saved securely to local storage.
-
-### 3. Build & Run the Backend
+### 3. Launch Backend Daemon
 ```powershell
-cd g:\v\IDE\backend
+cd backend
 go run ./cmd/nexusd
+# Listens on http://localhost:8080
 ```
-The daemon starts on `http://localhost:8080` with WebSocket streaming at `ws://localhost:8080/ws`.
 
-### 4. Start the Cursor-Style Frontend
-In a separate terminal:
+### 4. Launch Frontend IDE
 ```powershell
-cd g:\v\IDE\frontend
+cd frontend
+npm install
 npm run dev
-```
-Open **[http://localhost:3000](http://localhost:3000)** in your browser.
-
-### 5. Running Automated Tests
-All packages have 100% automated unit tests:
-```powershell
-cd g:\v\IDE\backend
-go test -v ./...
+# Opens at http://localhost:3000
 ```
 
 ---
 
-## 🔮 Roadmap & Future Enhancements
+## 💡 Lessons Learned for the AI Engineering Community
 
-1. **Native Desktop Executable (.exe):** Wrap the Vite frontend using Electron to produce a standalone Windows application window with no browser borders.
-2. **Streaming Tokens via SSE:** Stream token-by-token reasoning inside the Composer chat for instantaneous feedback.
-3. **Multi-Model Swarm Profiles:** In Settings, assign a reasoning model (e.g. DeepSeek R1) to the Critic and a coding model (e.g. Claude 3.7 Sonnet / Qwen 2.5 Coder) to the Coder.
-4. **Deep VS Code Extension Mode:** Allow running the NexusAI Swarm directly inside standard VS Code via an extension host.
+1. **Don't Let Agents Chat Without Tools:** Freeform multi-agent debates quickly spiral into sycophancy or infinite repetition unless bound to concrete deliverables (tasks, files, tests).
+2. **The Compiler Is the Ultimate Arbiter:** Human review and LLM self-critique are fallible; a failing compiler test is undeniable ground truth.
+3. **Decouple Brain from UI:** If you build an autonomous engineering tool, build it as a daemon or CLI first. The IDE UI is secondary to the reliability of the core execution loop.
 
 ---
 
-## 🤝 For AI Agents Collaborating on This Repo
-If you are an AI assistant (Claude, GPT, Gemini, Cursor) reading this repository, **you must read [AI_GUIDE.md](file:///g:/v/IDE/AI_GUIDE.md)** before proposing or making changes. It details the project's strict design principles, testing protocols, and core philosophies.
+## 📄 License
+MIT License. Created as an advanced research experiment in Multi-Agent Autonomous Software Engineering.

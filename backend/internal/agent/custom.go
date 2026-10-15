@@ -319,6 +319,11 @@ func (c *CustomAgent) Execute(ctx context.Context, sCtx *SwarmContext) (*domain.
 	if c.spec.Temperature > 0 {
 		req.Temperature = c.spec.Temperature
 	}
+	if sCtx != nil {
+		req.OnToken = func(tok string) {
+			sCtx.StreamToken(c.spec.Role, c.spec.Name, tok)
+		}
+	}
 
 	// With tools available, the agent works through request/response turns so it
 	// can read the real project and change it. Without them it falls back to a

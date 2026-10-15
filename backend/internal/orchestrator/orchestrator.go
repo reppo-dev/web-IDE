@@ -29,6 +29,7 @@ const (
 	EventPlanUpdated      EventType = "plan_updated"
 	EventTaskStep         EventType = "task_step"
 	EventLocksChanged     EventType = "locks_changed"
+	EventTokenChunk       EventType = "token_chunk"
 )
 
 // SwarmEvent is the real-time event dispatched during swarm execution.
@@ -43,6 +44,7 @@ type SwarmEvent struct {
 	Payload   interface{}                  `json:"payload,omitempty"`
 	Plan      *domain.ProjectPlan          `json:"plan,omitempty"`
 	Usage     map[string]domain.AgentUsage `json:"usage,omitempty"`
+	Chunk     string                       `json:"chunk,omitempty"`
 	Timestamp time.Time                    `json:"timestamp"`
 
 	// TaskID and Stream carry the live per-task conversation.

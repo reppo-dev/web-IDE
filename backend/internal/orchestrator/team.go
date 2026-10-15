@@ -59,6 +59,9 @@ func (o *Orchestrator) RunTeam(ctx context.Context, projectID, userPrompt string
 		ToolTimeout:    4 * time.Minute,
 		AgentModels:    make(map[domain.AgentRole]string),
 	}
+	sCtx.TokenStreamer = func(role domain.AgentRole, as string, taskID string, chunk string) {
+		o.streamToken(projectID, sCtx.Round, taskID, role, as, chunk)
+	}
 
 	// Load existing files from workspace if present on disk
 	if len(sCtx.CodeFilesSnapshot()) == 0 {

@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -105,13 +106,13 @@ func (c *OpenAICompatClient) Generate(ctx context.Context, req Request) (*Respon
 		model = req.Model
 	}
 
-	streamFalse := false
+	isStreaming := req.OnToken != nil
 	payload := chatCompletionRequest{
 		Model:       model,
 		Messages:    messages,
 		Temperature: temp,
 		MaxTokens:   c.config.MaxTokens,
-		Stream:      &streamFalse,
+		Stream:      &isStreaming,
 	}
 
 	if req.JSONSchema != nil {
@@ -146,13 +147,122 @@ func (c *OpenAICompatClient) Generate(ctx context.Context, req Request) (*Respon
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("api error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	if req.OnToken != nil {
+		reader := bufio.NewReader(resp.Body)
+		var sb strings.Builder
+		var reasonSb strings.Builder
+		promptToks := 0
+		compToks := 0
+		firstChunk := true
+		var fallbackBuf bytes.Buffer
+
+		for {
+			lineBytes, readErr := reader.ReadBytes('\n')
+			if len(lineBytes) > 0 {
+				line := strings.TrimSpace(string(lineBytes))
+				if firstChunk && strings.HasPrefix(line, "{") {
+					// Fallback if provider ignored stream=true and sent standard JSON object
+					fallbackBuf.Write(lineBytes)
+					rest, _ := io.ReadAll(reader)
+					fallbackBuf.Write(rest)
+					var jsonResp chatCompletionResponse
+					if err := json.Unmarshal(fallbackBuf.Bytes(), &jsonResp); err == nil && len(jsonResp.Choices) > 0 {
+						content := jsonResp.Choices[0].Message.Content
+						req.OnToken(content)
+						return &Response{
+							Content:      content,
+							Reasoning:    jsonResp.Choices[0].Message.ReasoningContent,
+							PromptTokens: jsonResp.Usage.PromptTokens,
+							OutputTokens: jsonResp.Usage.CompletionTokens,
+						}, nil
+					}
+					break
+				}
+				firstChunk = false
+
+				if strings.HasPrefix(line, "data:") {
+					payloadStr := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+					if payloadStr != "" && payloadStr != "[DONE]" {
+						var chunk struct {
+							Choices []struct {
+								Delta struct {
+									Content          string `json:"content"`
+									Reasoning        string `json:"reasoning"`
+									ReasoningContent string `json:"reasoning_content"`
+								} `json:"delta"`
+							} `json:"choices"`
+							Usage *chatCompletionUsage `json:"usage,omitempty"`
+						}
+						if err := json.Unmarshal([]byte(payloadStr), &chunk); err == nil {
+							if len(chunk.Choices) > 0 {
+								contentChunk := chunk.Choices[0].Delta.Content
+								if contentChunk != "" {
+									sb.WriteString(contentChunk)
+									req.OnToken(contentChunk)
+								}
+								r := chunk.Choices[0].Delta.ReasoningContent
+								if r == "" {
+									r = chunk.Choices[0].Delta.Reasoning
+								}
+								if r != "" {
+									reasonSb.WriteString(r)
+								}
+							}
+							if chunk.Usage != nil {
+								if chunk.Usage.PromptTokens > 0 {
+									promptToks = chunk.Usage.PromptTokens
+								}
+								if chunk.Usage.CompletionTokens > 0 {
+									compToks = chunk.Usage.CompletionTokens
+								}
+							}
+						}
+					}
+				}
+			}
+
+			if readErr != nil {
+				if readErr == io.EOF {
+					break
+				}
+				return nil, fmt.Errorf("failed reading stream: %w", readErr)
+			}
+		}
+
+		rawContent := sb.String()
+		reasoning := reasonSb.String()
+
+		if strings.Contains(rawContent, "<think>") && strings.Contains(rawContent, "</think>") {
+			sIdx := strings.Index(rawContent, "<think>") + len("<think>")
+			eIdx := strings.Index(rawContent, "</think>")
+			if eIdx > sIdx {
+				if reasoning == "" {
+					reasoning = strings.TrimSpace(rawContent[sIdx:eIdx])
+				}
+				rawContent = strings.TrimSpace(rawContent[:sIdx-len("<think>")] + rawContent[eIdx+len("</think>"):])
+			}
+		}
+
+		if rawContent == "" && reasoning != "" {
+			rawContent = reasoning
+		}
+
+		return &Response{
+			Content:      rawContent,
+			Reasoning:    reasoning,
+			PromptTokens: promptToks,
+			OutputTokens: compToks,
+		}, nil
+	}
+
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("api error (status %d): %s", resp.StatusCode, string(respBody))
 	}
 
 	var chatResp chatCompletionResponse

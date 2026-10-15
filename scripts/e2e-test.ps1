@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 #  تست end-to-end روی پروژه‌ی واقعی
 #
 #  چرا این فایل وجود دارد:
@@ -206,6 +206,7 @@ $buffer = New-Object byte[] 65536
 $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
 $lastActivity = Get-Date
 $eventCount = 0
+$script:tokenChunks = 0
 
 function Handle-Event($evt) {
     $script:eventCount++
@@ -276,6 +277,10 @@ function Handle-Event($evt) {
         "consensus_reached" {
             $script:consensusText = if ($evt.payload -is [string]) { $evt.payload } else { "" }
             Write-Host ("  [{0,4}] اجرا پایان یافت" -f $script:eventCount) -ForegroundColor Green
+        }
+
+        "token_chunk" {
+            $script:tokenChunks++
         }
 
         "error" {
@@ -503,6 +508,7 @@ Write-Host "  تسک‌های جریان‌دار    : $($script:taskStreams.Cou
 Write-Host "  بیشترین اجرای موازی  : $maxConcurrent ثانیه"
 Write-Host "  رویداد قفل          : $($script:lockEvents.Count)"
 Write-Host "  دورها               : $($script:roundStarts.Count)"
+Write-Host "  چانک توکن لایو      : $($script:tokenChunks)"
 Write-Host "  مصرف توکن           : $totalTokens"
 Write-Host "  خطا                 : $($script:errors.Count)"
 Write-Host ""

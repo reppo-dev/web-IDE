@@ -14,15 +14,19 @@ type Config struct {
 	MaxTokens   int     `json:"max_tokens"`
 }
 
+// TokenCallback is called whenever an incremental token chunk is received.
+type TokenCallback func(token string)
+
 // Request holds prompt inputs for an LLM call.
 type Request struct {
-	Model        string      `json:"model,omitempty"`
-	SystemPrompt string      `json:"system_prompt"`
-	UserPrompt   string      `json:"user_prompt"`
-	JSONSchema   interface{} `json:"json_schema,omitempty"`
-	Temperature  float64     `json:"temperature,omitempty"`
-	APIKey       string      `json:"api_key,omitempty"`
-	BaseURL      string      `json:"base_url,omitempty"`
+	Model        string        `json:"model,omitempty"`
+	SystemPrompt string        `json:"system_prompt"`
+	UserPrompt   string        `json:"user_prompt"`
+	JSONSchema   interface{}   `json:"json_schema,omitempty"`
+	Temperature  float64       `json:"temperature,omitempty"`
+	APIKey       string        `json:"api_key,omitempty"`
+	BaseURL      string        `json:"base_url,omitempty"`
+	OnToken      TokenCallback `json:"-"`
 }
 
 // Response holds the text and token metadata from an LLM call.

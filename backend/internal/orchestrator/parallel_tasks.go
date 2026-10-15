@@ -216,6 +216,13 @@ func (o *Orchestrator) runOneParallelTask(
 	// The lock is shared with every other worker, so it must be held through the
 	// fork as well.
 	fork.FileLocks = sCtx.FileLocks
+	fork.TokenStreamer = func(role domain.AgentRole, as string, taskID string, chunk string) {
+		worker := as
+		if worker == "" {
+			worker = agentName
+		}
+		o.streamToken(projectID, fork.Round, taskID, role, worker, chunk)
+	}
 
 	o.broadcastLocks(sCtx, projectID, sCtx.Round)
 

@@ -128,3 +128,44 @@ func TestOpenAICompatClient_SSEStream(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatClient_LiveOnTokenStreaming(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		stream := "data: {\"choices\":[{\"delta\":{\"content\":\"Hello \",\"reasoning\":\"thinking\"}}]}\n\n" +
+			"data: {\"choices\":[{\"delta\":{\"content\":\"world!\"}}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2}}\n\n" +
+			"data: [DONE]\n\n"
+		w.Write([]byte(stream))
+	}))
+	defer server.Close()
+
+	client := NewOpenAICompatClient(Config{
+		BaseURL: server.URL,
+		APIKey:  "test-key",
+		Model:   "flash_5",
+	})
+
+	var collectedTokens []string
+	resp, err := client.Generate(context.Background(), Request{
+		UserPrompt: "say hello",
+		OnToken: func(token string) {
+			collectedTokens = append(collectedTokens, token)
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if resp.Content != "Hello world!" {
+		t.Errorf("expected 'Hello world!', got %q", resp.Content)
+	}
+	if resp.Reasoning != "thinking" {
+		t.Errorf("expected reasoning 'thinking', got %q", resp.Reasoning)
+	}
+	if len(collectedTokens) != 2 || collectedTokens[0] != "Hello " || collectedTokens[1] != "world!" {
+		t.Errorf("unexpected collected tokens: %+v", collectedTokens)
+	}
+	if resp.PromptTokens != 10 || resp.OutputTokens != 2 {
+		t.Errorf("unexpected tokens: prompt=%d, comp=%d", resp.PromptTokens, resp.OutputTokens)
+	}
+}
+

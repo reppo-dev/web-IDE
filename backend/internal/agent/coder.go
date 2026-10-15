@@ -129,6 +129,13 @@ Your role:
 		defer cancel()
 	}
 
+	var onToken llm.TokenCallback
+	if sCtx != nil {
+		onToken = func(tok string) {
+			sCtx.StreamToken(domain.RoleCoder, "", tok)
+		}
+	}
+
 	resp, err := c.llmClient.Generate(callCtx, llm.Request{
 		Model:        cleanModel,
 		SystemPrompt: systemPrompt,
@@ -136,6 +143,7 @@ Your role:
 		JSONSchema:   map[string]interface{}{"type": "object"},
 		APIKey:       apiKey,
 		BaseURL:      baseURL,
+		OnToken:      onToken,
 	})
 	actualModel := cleanModel
 	if err != nil {
@@ -149,6 +157,7 @@ Your role:
 				JSONSchema:   map[string]interface{}{"type": "object"},
 				APIKey:       apiKey,
 				BaseURL:      baseURL,
+				OnToken:      onToken,
 			})
 		}
 		if err != nil {

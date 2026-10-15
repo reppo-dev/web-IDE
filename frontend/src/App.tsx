@@ -254,6 +254,56 @@ export const App: React.FC = () => {
           break;
         }
 
+        case 'token_chunk': {
+          if (!event.task_id || !event.chunk) break;
+          const chunk = event.chunk;
+          const taskId = event.task_id;
+          const agentRole = (event.stream_agent || event.agent || 'coder') as TaskStreamStep['agent'];
+          setActiveTaskId(taskId);
+          setTaskStreams((prev) => {
+            const list = prev[taskId] ?? [];
+            if (list.length === 0) {
+              return {
+                ...prev,
+                [taskId]: [{
+                  task_id: taskId,
+                  agent: agentRole,
+                  as: event.stream_agent,
+                  kind: 'thought',
+                  text: chunk,
+                  at: new Date().toISOString(),
+                }],
+              };
+            }
+            const lastIdx = list.length - 1;
+            const lastStep = list[lastIdx];
+            if (lastStep.kind === 'thought' || lastStep.kind === 'tool' || lastStep.kind === 'edit') {
+              const updated = [...list];
+              updated[lastIdx] = {
+                ...lastStep,
+                text: lastStep.text + chunk,
+              };
+              return { ...prev, [taskId]: updated };
+            } else {
+              return {
+                ...prev,
+                [taskId]: [
+                  ...list,
+                  {
+                    task_id: taskId,
+                    agent: agentRole,
+                    as: event.stream_agent,
+                    kind: 'thought',
+                    text: chunk,
+                    at: new Date().toISOString(),
+                  },
+                ],
+              };
+            }
+          });
+          break;
+        }
+
         case 'locks_changed':
           setFileLocks(event.locks ?? []);
           break;

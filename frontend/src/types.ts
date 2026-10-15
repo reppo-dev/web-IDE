@@ -125,7 +125,7 @@ export interface ChangeLedgerEntry {
 }
 
 export interface SwarmEvent {
-  type: 'agent_thinking' | 'agent_output' | 'round_started' | 'round_complete' | 'consensus_reached' | 'code_updated' | 'error' | 'teams_data' | 'team_saved' | 'team_deleted' | 'run_started' | 'plan_updated' | 'task_step' | 'locks_changed';
+  type: 'agent_thinking' | 'agent_output' | 'round_started' | 'round_complete' | 'consensus_reached' | 'code_updated' | 'error' | 'teams_data' | 'team_saved' | 'team_deleted' | 'run_started' | 'plan_updated' | 'task_step' | 'locks_changed' | 'token_chunk';
   project_id: string;
   round: number;
   /** The agent that produced this event. "manager" is the orchestrator itself. */
@@ -137,6 +137,8 @@ export interface SwarmEvent {
   plan?: ProjectPlan;
   usage?: Record<string, AgentUsage>;
   timestamp: string;
+  /** chunk: live token streaming chunk (§37) */
+  chunk?: string;
   /** teams_data: every team the user has saved. */
   teams?: Team[];
   /** teams_data: which team runs when a project has no explicit choice. */

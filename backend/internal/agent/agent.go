@@ -78,6 +78,9 @@ type SwarmContext struct {
 	// active agent in this round (PROJECT_VISION §17 & §37).
 	LastContextManifest *workspace.ContextManifest
 
+	// TokenStreamer is an optional callback to stream live tokens over WebSocket (PROJECT_VISION §37).
+	TokenStreamer func(role domain.AgentRole, as string, taskID string, chunk string)
+
 	// mu guards the mutable fields above. Agents inside a phase run
 	// concurrently and all write to the same context, so without this a
 	// custom team's shared state would be corrupted.
@@ -279,6 +282,24 @@ func (s *SwarmContext) ContextManifestSnapshot() *workspace.ContextManifest {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.LastContextManifest
+}
+
+// StreamToken dispatches an incremental token chunk to the live token streamer if configured.
+func (s *SwarmContext) StreamToken(role domain.AgentRole, as string, chunk string) {
+	if s == nil || chunk == "" {
+		return
+	}
+	s.mu.RLock()
+	streamer := s.TokenStreamer
+	taskID := ""
+	if s.ActiveTask != nil {
+		taskID = s.ActiveTask.ID
+	}
+	s.mu.RUnlock()
+
+	if streamer != nil {
+		streamer(role, as, taskID, chunk)
+	}
 }
 
 // PlanProgress reports how much of the plan is done and how much is left. The
