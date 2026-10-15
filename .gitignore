@@ -30,9 +30,16 @@ Thumbs.db
 *.swp
 *.swo
 
-# Environment variables
+# Environment variables & secrets
 .env
+.env.*
 .env.local
+.env.development
+.env.production
+*.env
+!.env.example
+secrets.*
+credentials.*
 
 # Logs and scratch
 *.log
