@@ -11,7 +11,7 @@
 
 ---
 
-## 📖 Executive Summary (معرفی کلی)
+## 📖 Executive Summary
 
 **NexusAI** is an experimental next-generation IDE and autonomous software development engine. Unlike conventional "wrapper" tools that merely stream ChatGPT responses into an editor, NexusAI orchestrates a **swarm of specialized AI agents** (Architect, Lead Coder, Adversarial Critic, Security Auditor, Arbiter) working over a shared local workspace.
 
@@ -76,16 +76,16 @@ It replaces the superficial "chat-bubble" paradigm with a **Plan-Driven State Ma
 
 ---
 
-## ⚡ Core Engineering Features (قابلیت‌های کلیدی مهندسی)
+## ⚡ Core Engineering Features
 
-### 1. Ground Truth Verification Engine (سندباکس اعتبارسنجی واقعی)
+### 1. Ground Truth Verification Engine
 Language models hallucinate syntax and import paths. NexusAI completely eliminates ungrounded code by executing real compiler tooling (`go test`, `flutter test`, `dart analyze`, `python compileall`, `tsc`) in isolated sub-processes with 30-second execution timeouts. If a test fails, the raw compiler stack trace is injected directly into the next rework cycle.
 
 ### 2. Plan-Driven State Machine & Task Decomposition
 Instead of writing an entire application in one giant prompt, the Architect decomposes features into a structured backlog stored on disk (`.project/plan.json` and human-readable `.project/tasks.md`):
 $$\text{Task States: } \text{TODO} \longrightarrow \text{IN\_PROGRESS} \longrightarrow \text{DONE} \mid \text{REWORK (Max 3)} \mid \text{WAITING\_FOR\_HUMAN}$$
 
-### 3. True Task Parallelism & File Lease Locks (موازی‌سازی واقعی تسک‌ها)
+### 3. True Task Parallelism & File Lease Locks
 Multiple coder agents can work concurrently on independent tasks. A central **File Lease Coordinator** prevents race conditions:
 - Agents obtain timed leases on specific files (`auth.dart`, `models.dart`).
 - Shared files cannot be modified simultaneously.
@@ -94,7 +94,7 @@ Multiple coder agents can work concurrently on independent tasks. A central **Fi
 ### 4. Git Checkpoint Isolation (`refs/nexusai/checkpoints`)
 NexusAI never clobbers or pollutes the user's `main` branch with intermediate experimental commits. Every round creates a tree object committed to a hidden reference (`refs/nexusai/checkpoints`). Only when the user clicks **"Accept Changes"** (or calls `POST /api/projects/:id/accept`) are verified changes cleanly merged into the active working tree.
 
-### 5. Multi-Model Heterogeneous Swarms (تیم‌های چندمدلی واقعی)
+### 5. Multi-Model Heterogeneous Swarms
 NexusAI avoids vendor lock-in. Workers can be distributed across different model providers simultaneously:
 - **Planner:** Claude 3.7 Sonnet / DeepSeek R1
 - **Parallel Workers:** Qwen 2.5 Coder, Nemotron, Llama 3.3, OpenAI GPT-4o
@@ -105,28 +105,28 @@ Supports SSE streaming directly through an internal concurrency-limiting guard (
 
 ---
 
-## 🔍 The Hard Truth: Shortcomings & What's Missing (کم و کسری‌ها و چالش‌های حل‌نشده)
+## 🔍 The Hard Truth: Shortcomings & What's Missing
 
 An honest post-mortem is worth more than a dozen marketing claims. While NexusAI solved difficult concurrency and verification problems, building an autonomous AI IDE revealed significant engineering boundaries and limitations:
 
-### ⚠️ 1. Token Economics & Cost Explosion (هزینه‌ی بالای مصرف توکن)
+### ⚠️ 1. Token Economics & Cost Explosion
 - **The Issue:** A multi-agent consensus run with 5 agents, cross-reviews, and 3 rounds of verification on a 30-task project can easily make 150+ LLM API calls and consume **300,000 to 1,500,000+ tokens**.
 - **Real-world Impact:** Running this on expensive proprietary models (like GPT-4o or Claude 3.7) costs several dollars per feature. Without aggressive token budgeting and cheap local models (Qwen/DeepSeek), it is economically unviable for continuous hobbyist use.
 
-### ⚠️ 2. Semantic vs Syntactic Conflict Resolution (تداخل‌های معنایی)
+### ⚠️ 2. Semantic vs Syntactic Conflict Resolution
 - **The Issue:** While file-lease locking prevents two agents from editing the same file at the same time (syntactic collision), it **cannot prevent semantic regressions across files**.
 - **Example:** Coder 1 modifies a function signature in `user_service.dart`, while concurrent Coder 2 calls the old signature in `profile_screen.dart`. Both write syntactically valid code in their own files, but the project breaks when compiled together.
 - **Current State:** Caught by the Verification Gate after merge, triggering a Rework cycle; but this burns extra rounds.
 
-### ⚠️ 3. Host Process Execution vs Full Containerization (امنیت سندباکس محلی)
+### ⚠️ 3. Host Process Execution vs Full Containerization
 - **The Issue:** The test runner executes commands directly on the host operating system (`exec.Command` on Windows/Linux).
 - **Security Limitation:** Unlike production sandbox environments (Docker, Firecracker MicroVMs, gVisor), there is no kernel-level filesystem or network isolation. If an untrusted package or hallucinated malicious shell command is introduced, it executes with the user's permissions.
 
-### ⚠️ 4. Standalone IDE Shell vs VS Code Extension Reality (سندروم ساخت مجدد چرخ)
+### ⚠️ 4. Standalone IDE Shell vs VS Code Extension Reality
 - **The Problem:** Building an entire desktop IDE from scratch (Monaco editor tabs, file tree, terminal emulator, git status widget) requires hundreds of hours of frontend maintenance.
 - **The Market Reality:** Developers do not want to abandon their custom VS Code / Cursor extensions, themes, and keybindings for a new standalone web-based IDE. The core moat of NexusAI is the **daemon and orchestration engine (`nexusd`)**, which would be far more effective packaged as a **VS Code Extension** or **CLI Agent (similar to Claude Code or Aider)**.
 
-### ⚠️ 5. The "Chatbot Swarm" Illusion in Commodity Tools (توهم تیم‌های چت‌باتی)
+### ⚠️ 5. The "Chatbot Swarm" Illusion in Commodity Tools
 - Tools like Grok, Hermes, and generic multi-agent wrappers let users create "teams" of agents. However, these are almost entirely **chat-based simulations**: they talk to each other in plain text without local compiler feedback, disk-level file locking, or git integrity.
 - **NexusAI's Lesson:** Building real software autonomously cannot be achieved through chatting alone. It requires deterministic systems engineering, hard timeouts, state machines, and human escalation gates.
 
